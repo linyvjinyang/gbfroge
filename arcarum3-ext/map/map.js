@@ -6,6 +6,12 @@
  */
 import {
   MSG,
+  DECK_STORAGE_KEY,
+  BATTLE_STORAGE_KEY,
+  OMEN_STORAGE_KEY,
+  PARTY_STORAGE_KEY,
+  ENEMY_STORAGE_KEY,
+  SHOP_STORAGE_KEY,
   CDN_BASES,
   NODE_SIZE,
   BASE_ANCHOR_X,
@@ -46,11 +52,31 @@ import {
   findLowestScorePathSticky,
   describeExploreScores,
   scoreForType,
+  makeSweepBias,
   REPLAN_STICKINESS,
+  DOWN_BIAS_WEIGHT,
   EXPLORE_WEIGHTS,
   EXPLORE_SCORE_FIELDS,
 } from "../shared/path/exploreScore.js";
+import {
+  QUICK_TARGETS,
+  defaultOpeningTarget,
+  hopDistances,
+  listSpecialIncidents,
+  quickTarget,
+} from "../shared/path/quickTargets.js";
+import { fitBounds, nearbyBounds } from "../shared/path/nearbyView.js";
+import {
+  describeShop,
+  mayOfferRemoval,
+  shopInfo,
+  shopMultiplier,
+  shopNodeScores,
+} from "../shared/shops.js";
+import { getGuidebookDisplayName } from "../shared/guidebookTranslations.js";
+import { getShopItemTranslation } from "../shared/shopItems.js";
 import { createGuidebookView } from "./guidebookView.js";
+import { createBuildView } from "./buildView.js";
 import { loadAssetImage, backgroundImageKey, selectBackgroundImage } from "../shared/assetImages.js";
 
 const canvas = document.getElementById("canvas");
@@ -59,10 +85,17 @@ const $ = (id) => document.getElementById(id);
 
 /** @type {any} */
 let state = null;
+/** 本局各商店的货架记录（后台维护） */
+let shopState = null;
+
+function currentCoins() {
+  return state?.possession_arcarum3_dungeon_point ?? shopState?.coin ?? null;
+}
 let activeWindowView = "map";
 
 const EXPLORE_WEIGHTS_STORAGE_KEY = "gbf-explore-score-weights-v1";
 let exploreWeights = loadExploreWeights();
+const EXPLORE_DOWN_STORAGE_KEY = "gbf-explore-down-v1";
 
 let scale = 0.45;
 let ox = 40;
@@ -94,6 +127,41 @@ let exploreScore = null;
 const showEmpty = $("show-empty");
 const showIds = $("show-ids");
 const showLegend = $("show-legend");
+const autoFit = $("auto-fit");
+const autoResearcher = $("auto-researcher");
+
+/** 设置页的勾选项；默认值就是 HTML 里的初始勾选状态 */
+const MAP_SETTINGS_STORAGE_KEY = "gbfroge-map-settings-v1";
+const MAP_SETTING_INPUTS = { autoFit, showEmpty, showIds, showLegend, autoResearcher };
+
+function loadMapSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(MAP_SETTINGS_STORAGE_KEY) || "{}");
+    for (const [key, input] of Object.entries(MAP_SETTING_INPUTS)) {
+      if (typeof saved[key] === "boolean") input.checked = saved[key];
+    }
+  } catch {
+    // 读不到就用默认值。
+  }
+}
+
+function saveMapSettings() {
+  try {
+    const values = Object.fromEntries(
+      Object.entries(MAP_SETTING_INPUTS).map(([key, input]) => [key, input.checked])
+    );
+    localStorage.setItem(MAP_SETTINGS_STORAGE_KEY, JSON.stringify(values));
+  } catch {
+    // 存不下也不影响本次会话的设置。
+  }
+}
+
+loadMapSettings();
+
+/** 玩家手动缩放/平移过之后，不再因为底图加载等原因自动重排视图 */
+let userAdjustedView = false;
+/** 玩家放弃过的开局目标（研究者）节点，避免清掉路线后又被自动设回 */
+let openingDismissedNodeId = null;
 
 /** 底图亮度（百分比，持久化到 localStorage） */
 let bgBrightness = (() => {
@@ -120,6 +188,24 @@ const guidebookView = createGuidebookView({
     if (activeWindowView === "guidebooks") updateGuidebookFooter(summary);
   },
 });
+const buildView = createBuildView();
+
+/** 最近一份导本数据：商店提示里用它把导本名显示成中文 */
+let guidebookCatalogue = {};
+
+/** 商店商品的显示名：导本用导本库里的中文名，其他商品用商品翻译 */
+function shopItemName(item) {
+  const entry = item.statusId != null ? guidebookCatalogue[String(item.statusId)] : null;
+  if (entry) return getGuidebookDisplayName(entry);
+  return getShopItemTranslation({ rawName: item.name }).name || item.name || "商品";
+}
+
+/** 导本同时驱动导本页和右栏的上限参考 */
+function applyGuidebooks(guidebookState) {
+  guidebookCatalogue = guidebookState?.catalogue || {};
+  guidebookView.render(guidebookState);
+  buildView.setGuidebooks(guidebookState);
+}
 
 // 图标绘制尺寸（世界坐标）
 const iconW = NODE_SIZE;
@@ -143,7 +229,11 @@ function loadImage(key, url) {
   images.set(key, img);
   loadAssetImage(img, url, {
     onLoad: () => {
-      if (String(key).startsWith("bg:")) syncBackgroundSize();
+      if (String(key).startsWith("bg:")) {
+        const before = `${mapW}x${mapH}`;
+        syncBackgroundSize();
+        if (before !== `${mapW}x${mapH}` && autoFit.checked && !userAdjustedView) applyViewMode();
+      }
       staticDirty = true;
       scheduleDraw();
     },
@@ -241,9 +331,7 @@ function scheduleDraw() {
 }
 
 function setZoomLabels() {
-  const t = `${Math.round(scale * 100)}%`;
-  $("zoom-label").textContent = t;
-  $("zoom-label-float").textContent = t;
+  $("zoom-label-float").textContent = `${Math.round(scale * 100)}%`;
 }
 
 function nodeMatchesFilter(n, current) {
@@ -542,6 +630,37 @@ function paint() {
       ctx.fill();
     }
   }
+  // 商店格右上角的小标：没去过「?」、还剩几件、买空「空」
+  ctx.save();
+  ctx.font = `bold ${Math.max(10, 13 * Math.min(1, scale * 1.6))}px sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (const n of nodes) {
+    if (Number(n.node_type) !== NODE_TYPE.SHOP) continue;
+    const info = shopInfo(shopState, n.node_id);
+    const label = !info.visited ? "?" : info.remaining.length ? String(info.remainingCount) : "空";
+    const s = worldToScreen(n.position_x, n.position_y);
+    const cx = s.x + hitR * 0.55 * scale;
+    const cy = s.y - iconH * 0.62 * scale;
+    const r = Math.max(8, 11 * Math.min(1, scale * 1.6));
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = !info.visited
+      ? "rgba(20, 29, 49, 0.92)"
+      : info.remaining.length
+        ? info.discount
+          ? "rgba(37, 121, 78, 0.95)"
+          : "rgba(120, 85, 28, 0.95)"
+        : "rgba(60, 60, 66, 0.9)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(240, 214, 143, 0.9)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = "#fff8e1";
+    ctx.fillText(label, cx, cy + 0.5);
+  }
+  ctx.restore();
+
   if (selectedId != null) mark(selectedId, "#ffd76a", Math.max(1.5, 2 * scale));
   if (hoverId != null && hoverId !== selectedId) {
     mark(hoverId, "rgba(255,255,255,0.55)", Math.max(1, 1.5 * scale));
@@ -629,6 +748,7 @@ function paint() {
   }
 
   setZoomLabels();
+  updateNodeTip();
 }
 
 function hitTest(sx, sy) {
@@ -650,32 +770,133 @@ function hitTest(sx, sy) {
   return best;
 }
 
+/** 选中节点：只画选中圈。详情提示纯粹跟随鼠标悬停，不会因为选中而一直挂着 */
 function showDetail(nid) {
   selectedId = nid;
-  const n = (state?.node_list || []).find((x) => x.node_id === nid);
-  const detailEl = $("detail");
-  const debugEl = $("detail-debug");
-  if (!n) {
-    renderNodeDetail(detailEl, null);
-    if (debugEl) debugEl.textContent = "—";
-    scheduleDraw();
+  scheduleDraw();
+}
+
+/** 提示里当前渲染的是哪个节点、哪一版地图状态，避免每帧重建 DOM */
+let tipRenderedKey = "";
+/** 说明文字里夹带的枚举名 / id，如「（RESEARCHER, id=8）」 */
+const DEV_PARENTHETICAL = /[（(][A-Za-z0-9_=,.\s-]+[）)]/g;
+
+/**
+ * 节点详情浮在鼠标悬停的图标旁边，鼠标移开就收起。
+ * 选特殊事件、点快捷目标、右键设目标都不会让它停留；拖动地图时也不显示。
+ */
+function updateNodeTip() {
+  const tip = $("node-tip");
+  const id = dragging ? null : hoverId;
+  const node = id == null ? null : (state?.node_list || []).find((x) => x.node_id === id);
+  if (!node) {
+    tip.hidden = true;
+    tipRenderedKey = "";
     return;
   }
-  const view = buildNodeDetailView(n, state);
-  renderNodeDetail(detailEl, view, { showDebug: false });
-  if (debugEl) debugEl.textContent = view.debugText;
-  scheduleDraw();
+  const key = `${id}|${state?.updatedAt || 0}|${shopState?.updatedAt || 0}`;
+  if (key !== tipRenderedKey) {
+    const view = buildNodeDetailView(node, state);
+    // 悬浮提示只给玩家看：名称、状态、一句说明。
+    // 接口字段、枚举名、图标文件名这类开发资料一律不显示。
+    view.tips = [];
+    view.legendLine = "";
+    view.summary = String(view.summary || "").replace(DEV_PARENTHETICAL, "").trim();
+    if (Number(node.node_type) === NODE_TYPE.SHOP) {
+      // 商店：这家还剩什么、多少钱；没去过就按本局见过的价格估
+      const info = shopInfo(shopState, id);
+      const coins = currentCoins();
+      const worth = shopMultiplier(shopState, id, coins);
+      view.summary =
+        `${describeShop(shopState, id)}。` +
+        (coins != null ? `现在有 ${coins} 币，寻路权重 ×${worth}。` : "");
+      view.tips = info.remaining
+        .slice()
+        .sort((a, b) => a.price - b.price)
+        .slice(0, 8)
+        .map((item) => `${item.price} 币${item.stock > 1 ? ` ×${item.stock}` : ""}　${shopItemName(item)}`);
+    }
+    renderNodeDetail($("detail"), view, { showDebug: false });
+    tipRenderedKey = key;
+  }
+  tip.hidden = false;
+
+  const point = worldToScreen(node.position_x, node.position_y);
+  const viewW = canvas.clientWidth;
+  const viewH = canvas.clientHeight;
+  const width = tip.offsetWidth;
+  const height = tip.offsetHeight;
+  const gap = hitR * scale + 12;
+  const margin = 8;
+  // 默认放在图标右侧，放不下就翻到左侧
+  let left = point.x + gap;
+  if (left + width > viewW - margin) left = point.x - gap - width;
+  left = Math.max(margin, Math.min(left, viewW - width - margin));
+  const top = Math.max(margin, Math.min(point.y - height / 2, viewH - height - margin));
+  tip.style.left = `${Math.round(left)}px`;
+  tip.style.top = `${Math.round(top)}px`;
 }
 
 function fitView() {
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
   if (w < 10 || h < 10) return;
+  userAdjustedView = false;
   const pad = 20;
   scale = Math.min((w - pad * 2) / mapW, (h - pad * 2) / mapH);
   ox = (w - mapW * scale) / 2;
   oy = (h - mapH * scale) / 2;
   scheduleDraw();
+}
+
+/** 「附近」：放大到当前位置周围几步；没有当前位置时退回全图 */
+function focusNearby() {
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  if (w < 10 || h < 10) return;
+  const bounds = nearbyBounds(state);
+  if (!bounds) {
+    fitView();
+    return;
+  }
+  userAdjustedView = false;
+  ({ scale, ox, oy } = fitBounds(bounds, w, h));
+  scheduleDraw();
+}
+
+/** 地图视图：full 全图 / near 附近。按钮切换，记住上次的选择 */
+const VIEW_MODE_STORAGE_KEY = "gbfroge-view-mode-v1";
+let viewMode = (() => {
+  try {
+    return localStorage.getItem(VIEW_MODE_STORAGE_KEY) === "near" ? "near" : "full";
+  } catch {
+    return "full";
+  }
+})();
+
+/** 按当前视图模式重新摆放地图 */
+function applyViewMode() {
+  if (viewMode === "near") focusNearby();
+  else fitView();
+}
+
+function setViewMode(mode) {
+  viewMode = mode === "near" ? "near" : "full";
+  try {
+    localStorage.setItem(VIEW_MODE_STORAGE_KEY, viewMode);
+  } catch {
+    // 存不下就只在本次会话内生效。
+  }
+  syncViewModeButtons();
+  applyViewMode();
+}
+
+function syncViewModeButtons() {
+  for (const [id, mode] of [["btn-view-full", "full"], ["btn-view-near", "near"]]) {
+    const active = viewMode === mode;
+    $(id).classList.toggle("is-active", active);
+    $(id).setAttribute("aria-pressed", String(active));
+  }
 }
 
 function centerOnCurrent() {
@@ -690,6 +911,7 @@ function centerOnCurrent() {
 }
 
 function zoomBy(factor, sx, sy) {
+  userAdjustedView = true;
   const before = screenToWorld(sx, sy);
   scale = Math.min(3, Math.max(0.12, scale * factor));
   ox = sx - before.x * scale;
@@ -837,25 +1059,27 @@ function updateRouteStats(sum) {
 }
 
 function setRouteButtonsEnabled(on) {
-  const a = $("btn-route-clear");
-  const b = $("btn-explore-clear");
-  if (a) a.disabled = !on;
-  if (b) b.disabled = !on;
+  $("btn-route-clear").disabled = !on;
+}
+
+/** 玩家主动换了路线或清掉路线：记下当前的研究者节点，之后不再自动设回 */
+function dismissOpeningTarget() {
+  const target = quickTarget(state, "researcher");
+  if (target.nodeId != null) openingDismissedNodeId = target.nodeId;
 }
 
 function clearRoute() {
+  dismissOpeningTarget();
   routeGoal = null;
   routeVias = [];
   routePath = null;
   routeMode = null;
   exploreScore = null;
   setRouteButtonsEnabled(false);
-  $("route-hint").textContent =
-    "左键查看；右键：第一个点=终点，之后=途经。路径为一条无回环折线。";
+  $("route-hint").textContent = "右键节点设为目标，再右键其他节点加途经。";
   const eh = $("explore-hint");
   if (eh) {
-    eh.textContent =
-      "从当前位置出发，不设终点；滑窗调点数后点「生成路径」。";
+    eh.textContent = "「生成路径」从当前位置扫一条收益最高的路线。";
   }
   updateRouteStats(null);
   const es = $("explore-stats");
@@ -866,11 +1090,112 @@ function clearRoute() {
   scheduleDraw();
 }
 
+/**
+ * 直接把某个节点设为目标并规划蓝线。
+ * @param {number} nodeId
+ * @param {string} [note] 写在提示最前面的来源说明
+ * @returns {boolean} 是否规划成功
+ */
+function routeToNode(nodeId, note = "") {
+  const goal = Number(nodeId);
+  if (Number(state?.current_node_id) === goal) {
+    $("status").textContent = `已经在 #${goal}`;
+    return false;
+  }
+  const plan = getTargetRoutePlan(goal, []);
+  if (!plan.path || plan.path.length < 2) {
+    const message = plan.error || `无法规划到 #${goal}`;
+    $("route-hint").textContent = message;
+    $("status").textContent = message;
+    return false;
+  }
+  exploreScore = null;
+  const es = $("explore-stats");
+  es.hidden = true;
+  es.innerHTML = "";
+  renderTargetRoute(goal, [], plan);
+  if (note) {
+    $("route-hint").textContent = `${note} · ${$("route-hint").textContent}`;
+    $("status").textContent = `${note}：#${goal}，${plan.path.length - 1} 步`;
+  }
+  return true;
+}
+
+function renderQuickTargets() {
+  const box = $("quick-targets");
+  box.replaceChildren();
+  for (const item of QUICK_TARGETS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn ghost btn-quick";
+    button.dataset.quick = item.kind;
+    button.textContent = item.label;
+    button.title = item.title;
+    box.append(button);
+  }
+  box.addEventListener("click", (event) => {
+    const button = event.target.closest?.("button[data-quick]");
+    if (!button) return;
+    const target = quickTarget(state, button.dataset.quick, {
+      mayOfferRemoval: (nodeId) => mayOfferRemoval(shopState, nodeId),
+    });
+    if (target.nodeId == null) {
+      $("status").textContent = target.reason;
+      $("route-hint").textContent = target.reason;
+      return;
+    }
+    // 点了别的快捷目标，就不再自动回到研究者
+    if (button.dataset.quick !== "researcher") dismissOpeningTarget();
+    if (routeToNode(target.nodeId, button.textContent)) showDetail(target.nodeId);
+  });
+}
+
+/** 顶部「本局特殊事件」：点一下寻路过去 */
+function renderSpecialBar() {
+  const list = $("special-list");
+  const items = listSpecialIncidents(state);
+  $("special-empty").hidden = items.length > 0;
+  $("special-empty").textContent = state?.node_list?.length ? "本局没有特殊事件" : "进图后显示";
+  list.replaceChildren();
+  const dist = items.length ? hopDistances(state) : new Map();
+  for (const item of items) {
+    // 传送口有多个入口：取最近的那个
+    const nearest = item.nodeIds
+      .filter((id) => dist.has(id))
+      .sort((a, b) => dist.get(a) - dist.get(b))[0] ?? item.nodeId;
+    const hops = dist.get(nearest);
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className =
+      "special-chip" +
+      (item.visited ? " is-visited" : "") +
+      (item.isResearcher ? " is-researcher" : "");
+    chip.dataset.nodeId = String(nearest);
+    chip.textContent =
+      item.name + (item.nodeIds.length > 1 ? ` ×${item.nodeIds.length}` : "") +
+      (hops ? ` · ${hops}步` : "");
+    chip.title = `${item.name} #${item.nodeIds.join(" / #")}${item.visited ? "（已访问）" : ""}，点击寻路`;
+    list.append(chip);
+  }
+}
+
+/** 开局默认目标：没有路线、研究者还没去过时，自动把它设为目标 */
+function maybeRouteToOpeningTarget() {
+  if (!autoResearcher.checked || routeMode != null) return;
+  const nodeId = defaultOpeningTarget(state, { dismissedNodeId: openingDismissedNodeId });
+  if (nodeId == null) return;
+  // 每个研究者节点只自动设一次；规划失败也不反复重试
+  openingDismissedNodeId = nodeId;
+  routeToNode(nodeId, "开局优先：浮空城研究者");
+}
+
 function getExploreOpts() {
   return {
     day: inferDay(state),
     weights: exploreWeights,
     miasmaCenter: getMiasmaCenter(state),
+    // 商店的分数按手里的币和剩余库存逐个算：钱多更值得去，买空了按空地算
+    nodeScores: shopNodeScores(state, shopState, exploreWeights),
   };
 }
 
@@ -942,7 +1267,53 @@ function refreshExploreLegend() {
   const miasmaNote = mc
     ? ` · 毒圈开：优先留在白圈内（惩罚 is_shrinking），不强制去圆心`
     : "";
-  el.textContent = `计分：${describeExploreScores(opts)}${miasmaNote}`;
+  const coins = currentCoins();
+  const shopNote =
+    exploreWeights.SHOP < 0
+      ? ` · 商店按币数和剩余库存加权（${coins != null ? `现有 ${coins} 币` : "币数未知，按 1 倍"}，最多 ×2.5，买空按空地）`
+      : "";
+  el.textContent = `计分：${describeExploreScores(opts)}${shopNote}${miasmaNote}`;
+}
+
+function loadExploreDown() {
+  const fallback = { enabled: true, upAfterEdge: true, weight: DOWN_BIAS_WEIGHT };
+  try {
+    const saved = JSON.parse(localStorage.getItem(EXPLORE_DOWN_STORAGE_KEY) || "{}");
+    const weight = Number(saved.weight);
+    return {
+      enabled: saved.enabled !== false,
+      upAfterEdge: saved.upAfterEdge !== false,
+      weight: Number.isFinite(weight) && weight >= 0 && weight <= 50 ? weight : DOWN_BIAS_WEIGHT,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function readExploreDown() {
+  const weight = Number($("explore-down-weight").value);
+  return {
+    enabled: $("explore-down").checked,
+    upAfterEdge: $("explore-up").checked,
+    weight: Number.isFinite(weight) ? Math.max(0, Math.min(50, weight)) : DOWN_BIAS_WEIGHT,
+  };
+}
+
+function initExploreDownControls() {
+  const saved = loadExploreDown();
+  $("explore-down").checked = saved.enabled;
+  $("explore-up").checked = saved.upAfterEdge;
+  $("explore-down-weight").value = String(saved.weight);
+  const persist = () => {
+    try {
+      localStorage.setItem(EXPLORE_DOWN_STORAGE_KEY, JSON.stringify(readExploreDown()));
+    } catch {
+      // 存不下也不影响本次会话的设置。
+    }
+  };
+  $("explore-down").addEventListener("change", persist);
+  $("explore-up").addEventListener("change", persist);
+  $("explore-down-weight").addEventListener("change", persist);
 }
 
 function updateExplorePointsLabel() {
@@ -968,6 +1339,31 @@ function runExploreGenerate() {
     requestAnimationFrame(() => {
       const t0 = performance.now();
       const map = toRouteMap(state);
+      // 缩圈位置未知时的扫图方向：先向下到边缘，到过之后掉头往上、往中间走；
+      // 缩圈出现后不再偏向任何方向（由「留在圈内」的规则接管）
+      const downSetting = readExploreDown();
+      const miasmaActive = Boolean(getMiasmaCenter(state));
+      const sweepEnabled = (downSetting.enabled || downSetting.upAfterEdge) && downSetting.weight > 0;
+      const downBias = sweepEnabled
+        ? makeSweepBias(map, Number(start), {
+            weight: downSetting.weight,
+            downFirst: downSetting.enabled,
+            upAfterEdge: downSetting.upAfterEdge,
+            visitedIds: (state.node_list || [])
+              .filter((node) => node.is_visited)
+              .map((node) => Number(node.node_id)),
+            miasmaActive,
+          })
+        : null;
+      const downNote = !sweepEnabled
+        ? ""
+        : downBias?.phase === "down"
+          ? " · 先向下到边缘"
+          : downBias?.phase === "up"
+            ? " · 向上并靠中间"
+            : miasmaActive
+              ? " · 缩圈已出现，不再偏向"
+              : " · 已到边缘";
       // 计划粘性：当前位置还在旧路线开头时，旧路线剩余段作为候选，
       // 新方案好不过 REPLAN_STICKINESS 分就沿用，避免每走一步路线大变
       const previousPath =
@@ -978,6 +1374,7 @@ function runExploreGenerate() {
           : null;
       const result = findLowestScorePathSticky(map, Number(start), n, {
         ...opts,
+        downBias,
         previousPath,
       });
       const ms = Math.round(performance.now() - t0);
@@ -987,6 +1384,7 @@ function runExploreGenerate() {
         $("status").textContent = "扫路失败";
         return;
       }
+      dismissOpeningTarget();
       routeMode = "explore";
       routeGoal = null;
       routeVias = [];
@@ -1017,9 +1415,9 @@ function runExploreGenerate() {
       const mc = getMiasmaCenter(state);
       const miasmaTag = mc ? " · 已偏好留白圈内" : "";
       $("explore-hint").textContent =
-        `D${result.day} · ${result.numPoints}/≤${maxN} 点 · 分 ${result.score.toFixed(1)} · 负分格 ${result.rewardCount} · 绿线${miasmaTag}${keptNote}`;
+        `D${result.day} · ${result.numPoints}/≤${maxN} 点 · 分 ${result.score.toFixed(1)} · 负分格 ${result.rewardCount} · 绿线${downNote}${miasmaTag}${keptNote}`;
       $("status").textContent =
-        `扫路完成：D${result.day} · ${result.numPoints}/≤${maxN} · 分 ${result.score.toFixed(1)}${result.keptPrevious ? " · 沿用旧路线" : " · 新路线"}${miasmaTag}`;
+        `扫路完成：D${result.day} · ${result.numPoints}/≤${maxN} · 分 ${result.score.toFixed(1)}${result.keptPrevious ? " · 沿用旧路线" : " · 新路线"}${downNote}${miasmaTag}`;
       updateRouteStats(null);
       $("route-hint").textContent =
         "当前显示为「收益扫路」（绿线）。右键目标寻路会切换为蓝线。";
@@ -1061,6 +1459,7 @@ function onRouteRightClick(nid) {
       return;
     }
 
+    dismissOpeningTarget();
     exploreScore = null;
     const es = $("explore-stats");
     if (es) {
@@ -1174,20 +1573,12 @@ function trimTargetRouteToCurrent() {
 }
 
 function updateProgressUI(sum) {
-  const line = sum?.progressLine || "第 — 天 · 第 — 回合";
-  const pl = $("progress-line");
-  if (pl) pl.textContent = line;
-  const sch = $("progress-schedule");
-  if (sch) sch.textContent = line;
-  const pt = $("progress-point");
-  if (pt) {
-    pt.textContent =
-      sum?.dungeonPoint != null && sum.dungeonPoint !== ""
-        ? String(sum.dungeonPoint)
-        : "—";
-  }
-  const mi = $("progress-miasma");
-  if (mi) mi.textContent = sum?.miasmaText || "—";
+  const line = $("progress-line");
+  line.textContent = sum?.progressLine || "第 — 天 · 第 — 回合";
+  // 瘴气说明较长，收进悬停提示
+  line.title = sum?.miasmaText ? `瘴气：${sum.miasmaText}` : "";
+  const hasPoint = sum?.dungeonPoint != null && sum.dungeonPoint !== "";
+  $("progress-point").textContent = `币 ${hasPoint ? sum.dungeonPoint : "—"}`;
 }
 
 function updateMapFooter(sum = summarize(state)) {
@@ -1214,24 +1605,46 @@ function switchWindowView(view) {
     button.setAttribute("aria-selected", String(active));
   });
   $("main").hidden = view !== "map";
+  $("special-bar").hidden = view !== "map";
   $("guidebook-view").hidden = view !== "guidebooks";
-  $("map-toolbar-controls").hidden = view !== "map";
+  $("settings-view").hidden = view !== "settings";
 
   if (view === "map") {
     updateMapFooter();
     document.title = `${summarize(state).name || "地图"} — ${summarize(state).progressLine}`;
     requestAnimationFrame(() => {
       resizeCanvas();
+      // 在别的页签时画布尺寸为 0，切回来要重新铺一次
+      if (autoFit.checked && !userAdjustedView) applyViewMode();
       scheduleDraw();
     });
-  } else {
+  } else if (view === "guidebooks") {
     updateGuidebookFooter();
-    document.title = "导本记录 — 转世沙盒";
+    document.title = "导本 · 盘子 — gbfroge";
+  } else {
+    $("status").textContent = "设置会自动保存";
+    document.title = "设置 — gbfroge";
   }
 }
 
 function applyState(s) {
+  // 回合数变小说明开了新一局：上一局放弃过的开局目标不再作数
+  const previousTurn = Number(state?.total_turn);
+  const nextTurn = Number(s?.total_turn);
+  if (Number.isFinite(previousTurn) && Number.isFinite(nextTurn) && nextTurn < previousTurn) {
+    openingDismissedNodeId = null;
+  }
+  const previousNodeId = state?.current_node_id;
+  const hadNodes = Boolean(state?.node_list?.length);
   state = s;
+  // 附近模式跟随当前位置：走了一步、或者第一次拿到地图时重新对准
+  if (
+    viewMode === "near" &&
+    state?.node_list?.length &&
+    (!hadNodes || Number(previousNodeId) !== Number(state.current_node_id))
+  ) {
+    focusNearby();
+  }
   ensureAssets();
   markStaticDirty();
   const sum = summarize(state);
@@ -1265,6 +1678,8 @@ function applyState(s) {
   } else {
     scheduleDraw();
   }
+  maybeRouteToOpeningTarget();
+  renderSpecialBar();
 }
 
 // —— 交互：仅左键拖拽/点选；右键设路线（避免 capture 吞掉右键）——
@@ -1330,7 +1745,10 @@ canvas.addEventListener("pointermove", (e) => {
   if (dragging && activePointerId === e.pointerId) {
     const dx = e.clientX - lastX;
     const dy = e.clientY - lastY;
-    if (Math.abs(dx) + Math.abs(dy) > 2) dragMoved = true;
+    if (Math.abs(dx) + Math.abs(dy) > 2) {
+      dragMoved = true;
+      userAdjustedView = true;
+    }
     ox += dx;
     oy += dy;
     lastX = e.clientX;
@@ -1380,13 +1798,19 @@ canvas.addEventListener("pointerup", (e) => {
   const isClick = endPointerDrag(e);
   if (isClick) {
     const rect = canvas.getBoundingClientRect();
-    const id = hitTest(e.clientX - rect.left, e.clientY - rect.top);
-    if (id != null) showDetail(id);
+    // 点到节点：选中；点空白处：取消选中
+    showDetail(hitTest(e.clientX - rect.left, e.clientY - rect.top));
   }
 });
 
 canvas.addEventListener("pointercancel", (e) => {
   endPointerDrag(e);
+});
+
+canvas.addEventListener("pointerleave", () => {
+  if (hoverId == null) return;
+  hoverId = null;
+  scheduleDraw();
 });
 
 canvas.addEventListener("lostpointercapture", () => {
@@ -1414,28 +1838,32 @@ canvas.addEventListener(
   { passive: false }
 );
 
-canvas.addEventListener("dblclick", () => fitView());
+// 双击：回到当前视图模式的默认摆放（手动拖动或缩放之后用）
+canvas.addEventListener("dblclick", () => applyViewMode());
 
-$("btn-fit").addEventListener("click", fitView);
-$("btn-100").addEventListener("click", () => {
-  scale = 1;
-  ox = 20;
-  oy = 20;
-  scheduleDraw();
+$("btn-view-full").addEventListener("click", () => setViewMode("full"));
+$("btn-view-near").addEventListener("click", () => setViewMode("near"));
+syncViewModeButtons();
+$("btn-center").addEventListener("click", () => {
+  userAdjustedView = true;
+  centerOnCurrent();
 });
-$("btn-center").addEventListener("click", centerOnCurrent);
-$("btn-zoom-in").addEventListener("click", () => {
-  zoomBy(1.15, canvas.clientWidth / 2, canvas.clientHeight / 2);
-});
-$("btn-zoom-out").addEventListener("click", () => {
-  zoomBy(1 / 1.15, canvas.clientWidth / 2, canvas.clientHeight / 2);
-});
+
+function applyLegendVisibility() {
+  $("legend-dock").hidden = !showLegend.checked;
+}
 
 showEmpty.addEventListener("change", markStaticDirty);
 showIds.addEventListener("change", markStaticDirty);
-showLegend.addEventListener("change", () => {
-  $("legend-dock").style.display = showLegend.checked ? "" : "none";
+showLegend.addEventListener("change", applyLegendVisibility);
+autoFit.addEventListener("change", () => {
+  if (autoFit.checked) applyViewMode();
 });
+autoResearcher.addEventListener("change", maybeRouteToOpeningTarget);
+for (const input of Object.values(MAP_SETTING_INPUTS)) {
+  input.addEventListener("change", saveMapSettings);
+}
+applyLegendVisibility();
 
 // 底图亮度滑杆
 const bgBrightSlider = $("bg-bright");
@@ -1474,8 +1902,17 @@ if (exploreSlider) {
   updateExplorePointsLabel();
 }
 renderExploreScoreControls();
+initExploreDownControls();
 $("btn-explore-gen")?.addEventListener("click", runExploreGenerate);
-$("btn-explore-clear")?.addEventListener("click", clearRoute);
+renderQuickTargets();
+$("special-list").addEventListener("click", (event) => {
+  const chip = event.target.closest?.("button[data-node-id]");
+  if (!chip) return;
+  const nodeId = Number(chip.dataset.nodeId);
+  dismissOpeningTarget();
+  routeToNode(nodeId, "特殊事件");
+  showDetail(nodeId);
+});
 refreshExploreLegend();
 
 document.querySelectorAll("[data-window-view]").forEach((button) => {
@@ -1483,12 +1920,14 @@ document.querySelectorAll("[data-window-view]").forEach((button) => {
 });
 
 window.addEventListener("resize", () => {
-  if (activeWindowView === "map") resizeCanvas();
+  if (activeWindowView !== "map") return;
+  resizeCanvas();
+  if (autoFit.checked) applyViewMode();
 });
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === MSG.STATE_UPDATED) applyState(msg.state);
-  if (msg?.type === MSG.GUIDEBOOKS_UPDATED) guidebookView.render(msg.state);
+  if (msg?.type === MSG.GUIDEBOOKS_UPDATED) applyGuidebooks(msg.state);
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -1497,20 +1936,161 @@ chrome.storage.onChanged.addListener((changes, area) => {
     applyState(changes.arcarum3MapState.newValue || null);
   }
   if (changes.arcarum3Guidebooks) {
-    guidebookView.render(changes.arcarum3Guidebooks.newValue || null);
+    applyGuidebooks(changes.arcarum3Guidebooks.newValue || null);
   }
+  if (changes[DECK_STORAGE_KEY]) buildView.setDeck(changes[DECK_STORAGE_KEY].newValue || null);
+  if (changes[BATTLE_STORAGE_KEY]) {
+    buildView.setBattle(changes[BATTLE_STORAGE_KEY].newValue || null);
+  }
+  if (changes[OMEN_STORAGE_KEY]) buildView.setOmens(changes[OMEN_STORAGE_KEY].newValue || null);
+  if (changes[PARTY_STORAGE_KEY]) buildView.setParty(changes[PARTY_STORAGE_KEY].newValue || null);
+  if (changes[ENEMY_STORAGE_KEY]) buildView.setEnemies(changes[ENEMY_STORAGE_KEY].newValue || null);
+  if (changes[SHOP_STORAGE_KEY]) applyShops(changes[SHOP_STORAGE_KEY].newValue || null);
 });
+
+function applyShops(next) {
+  shopState = next;
+  refreshExploreLegend();
+  scheduleDraw();
+}
+
+/**
+ * 两种刷新：
+ *   1. 推送 —— 玩家在游戏里每做一步，后台写入存储，上面的监听立刻更新；
+ *   2. 兜底 —— 每 10 秒、以及窗口切回前台时，直接读一遍存储，和手里的不一样才重画。
+ * 兜底只读本地存储，不会向游戏服务器发任何请求。
+ */
+const RESYNC_INTERVAL_MS = 10_000;
+/** 各份数据上次兜底同步时的内容：没变就不重画（重画会打断悬浮提示） */
+const resyncSeen = new Map();
+const RESYNC_TARGETS = [
+  ["arcarum3MapState", (value) => applyState(value)],
+  ["arcarum3Guidebooks", (value) => applyGuidebooks(value)],
+  [DECK_STORAGE_KEY, (value) => buildView.setDeck(value)],
+  [OMEN_STORAGE_KEY, (value) => buildView.setOmens(value)],
+  [PARTY_STORAGE_KEY, (value) => buildView.setParty(value)],
+  [ENEMY_STORAGE_KEY, (value) => buildView.setEnemies(value)],
+  [SHOP_STORAGE_KEY, (value) => applyShops(value)],
+  [BATTLE_STORAGE_KEY, (value) => buildView.setBattle(value)],
+];
+
+async function resync() {
+  if (document.hidden) return;
+  let bag;
+  try {
+    bag = await chrome.storage.local.get(RESYNC_TARGETS.map(([key]) => key));
+  } catch {
+    return;
+  }
+  for (const [key, apply] of RESYNC_TARGETS) {
+    // 存储里没有这一项时不动：清空由推送负责
+    if (!bag || !(key in bag)) continue;
+    const signature = JSON.stringify(bag[key] ?? null);
+    const seen = resyncSeen.get(key);
+    resyncSeen.set(key, signature);
+    // 第一次只记下内容（刚打开窗口时已经读过一遍）
+    if (seen === undefined || seen === signature) continue;
+    apply(bag[key] ?? null);
+  }
+}
+
+setInterval(resync, RESYNC_INTERVAL_MS);
+document.addEventListener("visibilitychange", resync);
+window.addEventListener("focus", resync);
+
+/** 右栏各折叠面板的开合状态，下次打开窗口时保持 */
+const FOLD_STORAGE_KEY = "gbfroge-panel-folds-v1";
+function initPanelFolds() {
+  let saved = {};
+  try {
+    saved = JSON.parse(localStorage.getItem(FOLD_STORAGE_KEY) || "{}") || {};
+  } catch {
+    saved = {};
+  }
+  const folds = [...document.querySelectorAll("details[data-fold]")];
+  for (const fold of folds) {
+    if (typeof saved[fold.dataset.fold] === "boolean") fold.open = saved[fold.dataset.fold];
+    fold.addEventListener("toggle", () => {
+      try {
+        localStorage.setItem(
+          FOLD_STORAGE_KEY,
+          JSON.stringify(Object.fromEntries(folds.map((item) => [item.dataset.fold, item.open])))
+        );
+      } catch {
+        // 存不下就只在本次会话内生效。
+      }
+    });
+  }
+}
+initPanelFolds();
+
+/** 战斗 / 导本两列各自可以收成竖条；收起后地图变宽，要重新铺一次 */
+const COLUMN_STORAGE_KEY = "gbfroge-panel-columns-v1";
+function initPanelColumns() {
+  let saved = {};
+  try {
+    saved = JSON.parse(localStorage.getItem(COLUMN_STORAGE_KEY) || "{}") || {};
+  } catch {
+    saved = {};
+  }
+  const columns = [...document.querySelectorAll(".panel-col[data-col]")];
+  const apply = (column, collapsed) => {
+    column.classList.toggle("is-collapsed", collapsed);
+    const toggle = column.querySelector(".panel-col-toggle");
+    toggle.setAttribute("aria-expanded", String(!collapsed));
+  };
+  for (const column of columns) {
+    apply(column, saved[column.dataset.col] === true);
+    column.querySelector(".panel-col-toggle").addEventListener("click", () => {
+      apply(column, !column.classList.contains("is-collapsed"));
+      try {
+        localStorage.setItem(
+          COLUMN_STORAGE_KEY,
+          JSON.stringify(
+            Object.fromEntries(columns.map((item) => [item.dataset.col, item.classList.contains("is-collapsed")]))
+          )
+        );
+      } catch {
+        // 存不下就只在本次会话内生效。
+      }
+      requestAnimationFrame(() => {
+        resizeCanvas();
+        if (autoFit.checked) applyViewMode();
+      });
+    });
+  }
+}
+initPanelColumns();
+
+// 路线详情放在设置页；主页面只在底部状态栏显示一句，免得规划失败时没有任何反馈
+for (const id of ["route-hint", "explore-hint"]) {
+  const source = $(id);
+  new MutationObserver(() => {
+    if (activeWindowView === "map" && source.textContent.trim()) {
+      $("status").textContent = source.textContent.trim();
+    }
+  }).observe(source, { childList: true, characterData: true, subtree: true });
+}
 
 async function init() {
   resizeCanvas();
-  const [mapResponse, guidebookResponse] = await Promise.all([
+  const [mapResponse, guidebookResponse, buildResponse] = await Promise.all([
     chrome.runtime.sendMessage({ type: MSG.GET_STATE }),
     chrome.runtime.sendMessage({ type: MSG.GET_GUIDEBOOKS }),
+    chrome.runtime.sendMessage({ type: MSG.GET_BUILD }),
   ]);
   applyState(mapResponse?.state || null);
-  guidebookView.render(guidebookResponse?.state || null);
+  applyGuidebooks(guidebookResponse?.state || null);
+  buildView.setDeck(buildResponse?.deck || null);
+  buildView.setOmens(buildResponse?.omens || null);
+  buildView.setParty(buildResponse?.party || null);
+  buildView.setEnemies(buildResponse?.enemies || null);
+  applyShops(buildResponse?.shops || null);
+  buildView.setBattle(buildResponse?.battle || null);
   switchWindowView("map");
-  setTimeout(() => fitView(), 80);
+  setTimeout(() => applyViewMode(), 80);
+  // 记下刚读到的内容，之后的兜底同步只在有变化时重画
+  resync();
 }
 
 init();

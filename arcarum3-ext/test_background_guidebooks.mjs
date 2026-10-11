@@ -54,7 +54,7 @@ globalThis.chrome = {
         return { ...storage };
       },
       async set(values) { Object.assign(storage, values); },
-      async remove(key) { delete storage[key]; },
+      async remove(key) { for (const item of [].concat(key)) delete storage[item]; },
     },
   },
   downloads: {

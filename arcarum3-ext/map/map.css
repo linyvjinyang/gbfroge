@@ -78,8 +78,8 @@ body::before {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 64px;
-  padding: 8px 14px;
+  min-height: 48px;
+  padding: 6px 14px;
   border-bottom: 1px solid var(--gold-line);
   background:
     radial-gradient(100% 140% at 0% 0%, rgba(216, 173, 85, 0.12), transparent 52%),
@@ -129,7 +129,7 @@ body::before {
 
 .window-view-switch {
   display: grid;
-  grid-template-columns: repeat(2, minmax(72px, 1fr));
+  grid-template-columns: repeat(3, minmax(64px, auto));
   gap: 3px;
   padding: 3px;
   border: 1px solid var(--border);
@@ -295,7 +295,7 @@ button:disabled {
 
 #main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(328px, 370px);
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
   flex: 1;
   min-height: 0;
   position: relative;
@@ -1267,4 +1267,1634 @@ button:disabled {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
+}
+
+/* ———————————————— 右栏：盘子 + 当前伤害 ———————————————— */
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.card-head h2 {
+  margin: 0;
+  flex: 1;
+}
+
+.card-count {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.card-empty,
+.card-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.card-note {
+  margin-top: 8px;
+}
+
+/* 主手竖放在左，2–10 为 3×3，11–13 为右侧追加列 */
+.weapon-grid {
+  display: grid;
+  grid-template-columns: 0.62fr repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(3, auto);
+  gap: 4px;
+}
+
+.weapon-cell {
+  position: relative;
+  min-width: 0;
+  aspect-ratio: 7 / 4;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: var(--card-2);
+}
+
+.weapon-cell.is-main {
+  aspect-ratio: auto;
+  border-color: var(--border);
+}
+
+.weapon-cell.is-blank {
+  border-style: dashed;
+  opacity: 0.45;
+}
+
+.thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.thumb-text {
+  padding: 2px 3px;
+  font-size: 0.68rem;
+  line-height: 1.2;
+  color: var(--parchment-soft);
+  text-align: center;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.summon-row {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.summon-cell {
+  aspect-ratio: 7 / 4;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: var(--card-2);
+}
+
+.summon-cell.is-main {
+  border-color: var(--border);
+}
+
+.effect-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px 10px;
+  margin-top: 8px;
+}
+
+.effect-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.effect-item .thumb {
+  width: auto;
+  height: 18px;
+  flex: 0 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+}
+
+.effect-item .thumb img {
+  width: auto;
+  height: 100%;
+  object-fit: contain;
+}
+
+.effect-item .thumb-text {
+  padding: 0;
+  text-align: left;
+  -webkit-line-clamp: 1;
+}
+
+.effect-item.is-max .effect-value {
+  color: var(--gold-bright);
+  font-weight: 700;
+}
+
+.estimate-list,
+.mods-list {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 12px;
+  font-size: 0.88rem;
+  background: var(--card-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+}
+
+.mods-list {
+  margin: 8px 0 0;
+}
+
+.estimate-list dt,
+.mods-list dt {
+  margin: 0;
+  color: var(--muted);
+}
+
+.estimate-list dd,
+.mods-list dd {
+  margin: 0;
+  font-weight: 650;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.enemy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.enemy-list:not(:empty) {
+  margin-bottom: 10px;
+}
+
+.enemy-row.is-dead {
+  opacity: 0.5;
+}
+
+.enemy-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+.enemy-name {
+  font-weight: 650;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.enemy-hp {
+  color: var(--parchment-soft);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.enemy-bar {
+  height: 6px;
+  margin-top: 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+
+.enemy-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--rose), #e59a6a);
+}
+
+.condition-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: 4px;
+  min-width: 0;
+}
+
+.condition-strip img {
+  width: 20px;
+  height: 20px;
+}
+
+.party-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.party-status-row {
+  display: grid;
+  grid-template-columns: 5.5em minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.party-status-row .condition-strip {
+  margin-top: 0;
+}
+
+.party-status-name {
+  font-size: 0.78rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.damage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.damage-table th,
+.damage-table td {
+  padding: 5px 4px;
+  text-align: right;
+  border-bottom: 1px solid rgba(216, 173, 85, 0.08);
+  white-space: nowrap;
+}
+
+.damage-table thead th {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.74rem;
+}
+
+.damage-table th:first-child {
+  text-align: left;
+  font-weight: 500;
+  color: var(--parchment-soft);
+}
+
+.damage-table td.is-capped {
+  color: var(--gold-bright);
+  font-weight: 700;
+}
+
+.damage-table tbody tr:last-child th,
+.damage-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* 可折叠的次要面板 */
+.panel-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.panel-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.panel-fold > summary::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin-right: 12px;
+  border-right: 2px solid var(--parchment-dim);
+  border-bottom: 2px solid var(--parchment-dim);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+}
+
+.panel-fold[open] > summary::after {
+  transform: rotate(45deg);
+}
+
+.panel-fold > summary h2 {
+  flex: 1;
+  margin: 0;
+}
+
+.panel-fold[open] > summary {
+  margin-bottom: 10px;
+}
+
+.panel-fold > summary:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+.explore-down {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 10px 0 8px;
+  font-size: 0.86rem;
+}
+
+.explore-down-weight {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.explore-down-weight input {
+  width: 4.2em;
+}
+
+/* ———————————————— 精简后的窗口：顶部特殊事件条 / 地图浮动按钮 / 设置页 ———————————————— */
+
+.special-bar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  background: rgba(8, 13, 24, 0.9);
+  font-size: 0.82rem;
+}
+
+.special-bar-label {
+  flex: 0 0 auto;
+  color: var(--gold);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.special-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.special-empty {
+  color: var(--muted);
+}
+
+.special-chip {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.special-chip.is-researcher {
+  border-color: var(--gold);
+  color: var(--gold-bright);
+}
+
+.special-chip.is-visited {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+/* 左上：寻路 */
+.route-bar {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: calc(100% - 24px);
+  padding: 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: rgba(7, 11, 20, 0.82);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow);
+}
+
+.route-bar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.route-bar .btn,
+.route-bar .btn-preset {
+  padding: 5px 11px;
+  font-size: 12.5px;
+}
+
+.route-bar .route-presets {
+  margin: 0 0 0 6px;
+  gap: 3px;
+}
+
+.route-bar .route-presets .btn-preset {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+}
+
+/* 左下：图例 + 定位自己 */
+.map-corner {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: calc(100% - 190px);
+}
+
+.map-corner .legend-dock {
+  position: static;
+  max-width: 100%;
+}
+
+.map-corner-btn {
+  background: rgba(7, 11, 20, 0.82);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow);
+}
+
+.map-zoom-btn.map-zoom-fit {
+  width: auto;
+  padding: 0 9px;
+  font-size: 0.8rem;
+}
+
+.btn-mini {
+  padding: 2px 9px;
+  font-size: 11.5px;
+}
+
+/* 平A最高伤害 + 击杀预测 */
+.kill-box {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--parchment-dim);
+  border-radius: 5px;
+  background: var(--card-2);
+}
+
+.kill-box.is-kill {
+  border-left-color: var(--green);
+}
+
+.kill-box.is-far {
+  border-left-color: var(--gold);
+}
+
+.kill-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.kill-label {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.kill-value {
+  flex: 1;
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold-bright);
+}
+
+.kill-text {
+  margin: 4px 0 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--parchment-soft);
+}
+
+.kill-box.is-kill .kill-text {
+  color: #a8e5bd;
+  font-weight: 650;
+}
+
+.route-info .route-hint:last-of-type {
+  margin-bottom: 0;
+}
+
+.route-info .route-stats {
+  margin-bottom: 8px;
+}
+
+/* 导本页左栏顶部的盘子 */
+.guidebook-live-panel .build-card {
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.guidebook-live-panel .build-card h2 {
+  font-size: 1rem;
+  color: var(--gold-bright);
+}
+
+.guidebook-live-panel .weapon-grid,
+.guidebook-live-panel .summon-row {
+  max-width: 460px;
+}
+
+/* 设置页 */
+.settings-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  position: relative;
+  z-index: 1;
+}
+
+.settings-shell {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.settings-group h2 {
+  margin-bottom: 2px;
+}
+
+.settings-group .explore-down,
+.settings-group .explore-score-settings,
+.settings-group input[type="range"]#explore-points {
+  width: 100%;
+}
+
+.settings-group .route-hint {
+  margin: 0;
+}
+
+@media (max-width: 960px) {
+  .route-bar .route-presets {
+    margin-left: 0;
+  }
+}
+
+/* ———————————————— 节点详情：悬浮在图标旁 ———————————————— */
+
+.node-tip {
+  position: absolute;
+  z-index: 6;
+  width: min(300px, calc(100% - 16px));
+  padding: 10px 12px;
+  border: 1px solid var(--gold-line);
+  border-radius: 6px;
+  background: rgba(8, 12, 22, 0.94);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(8px);
+  /* 不挡鼠标：否则提示盖住图标时悬停状态会来回跳 */
+  pointer-events: none;
+}
+
+.node-tip .node-detail {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 0.84rem;
+}
+
+.node-tip .node-detail-title {
+  margin-top: 0;
+}
+
+.node-tip .node-detail > :last-child {
+  margin-bottom: 0;
+}
+
+/* ———————————————— 预兆 ———————————————— */
+
+.omen-alert {
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border: 1px solid rgba(216, 173, 85, 0.5);
+  border-left: 4px solid var(--gold);
+  border-radius: 5px;
+  background: rgba(216, 173, 85, 0.1);
+}
+
+.omen-alert.is-major {
+  border-color: rgba(207, 102, 142, 0.7);
+  border-left-color: var(--rose);
+  background: rgba(207, 102, 142, 0.14);
+  box-shadow: 0 0 0 1px rgba(207, 102, 142, 0.25), 0 0 14px rgba(207, 102, 142, 0.25);
+}
+
+.omen-alert-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.omen-alert-head strong {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.92rem;
+  color: var(--gold-bright);
+  overflow-wrap: anywhere;
+}
+
+.omen-alert.is-major .omen-alert-head strong {
+  color: #f3b6cb;
+}
+
+.omen-tag {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--rose);
+  color: #2a0714;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.omen-conditions {
+  margin: 6px 0 0;
+  padding-left: 1.2em;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--parchment);
+}
+
+.omen-conditions .is-empty {
+  color: var(--muted);
+  list-style: none;
+  margin-left: -1.2em;
+}
+
+.omen-note {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.omen-log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.omen-log-boss {
+  padding-left: 9px;
+  border-left: 2px solid var(--border);
+}
+
+.omen-log-boss.is-major {
+  border-left-color: var(--rose);
+}
+
+.omen-log-name {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 0.9rem;
+  color: var(--parchment);
+}
+
+.omen-log-list {
+  margin: 0;
+  padding-left: 1.4em;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--parchment-soft);
+}
+
+/* ———————————————— 导本速查 ———————————————— */
+
+.quickref-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 0 6px;
+  font-size: 0.84rem;
+  font-weight: 650;
+  color: var(--gold-bright);
+}
+
+.quickref-heading.is-cursed {
+  margin-top: 0;
+  color: #f3a3a3;
+}
+
+.quickref-tip {
+  margin: 0;
+}
+
+.quickref-list,
+.quickref-cursed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.quickref-list {
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: #33445c transparent;
+}
+
+.quickref-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: var(--card-2);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  cursor: grab;
+}
+
+.quickref-item.is-held {
+  border-color: rgba(111, 195, 143, 0.5);
+  background: rgba(37, 91, 65, 0.22);
+}
+
+.quickref-item.is-dragging {
+  opacity: 0.45;
+}
+
+.quickref-name {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.quickref-tag,
+.quickref-held {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.quickref-tag {
+  border: 1px solid var(--border);
+  color: var(--parchment-dim);
+}
+
+.quickref-held {
+  background: rgba(111, 195, 143, 0.2);
+  color: #a8e5bd;
+}
+
+.quickref-remove {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--parchment-dim);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.quickref-none {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* 仿 Tarou：持有的 debuff 导本用红色光晕标出 */
+.quickref-cursed {
+  gap: 8px;
+  padding: 3px;
+  margin-bottom: 10px;
+}
+
+.quickref-cursed-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  background: rgba(60, 12, 16, 0.5);
+  box-shadow: 0 0 3px 3px #dc2626;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.quickref-cursed-item .quickref-held {
+  background: rgba(220, 38, 38, 0.3);
+  color: #fecaca;
+}
+
+/* ———————————————— 右栏顶部：队伍血量 + 战斗状态 ———————————————— */
+
+.party-hp {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(54px, 68px));
+  gap: 5px;
+}
+
+.party-tile {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: var(--card-2);
+  text-align: center;
+}
+
+.party-tile .thumb {
+  aspect-ratio: 1;
+  height: auto;
+}
+
+.party-tile.is-dead {
+  opacity: 0.45;
+  filter: grayscale(1);
+}
+
+.party-bar {
+  height: 5px;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.party-bar-fill {
+  height: 100%;
+  background: var(--green);
+}
+
+.party-tile.is-danger .party-bar-fill {
+  background: var(--rose);
+}
+
+.party-hp-text {
+  display: block;
+  padding: 1px 2px 2px;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--parchment-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.party-tile.is-danger .party-hp-text {
+  color: #f3a3a3;
+  font-weight: 650;
+}
+
+/* 卡片内部的小折叠（战斗状态） */
+.inline-fold {
+  margin-top: 8px;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 6px;
+}
+
+.inline-fold > summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.inline-fold > summary:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* 每人一组，横向排开 */
+.party-status {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding-top: 6px;
+  border-top: 0;
+}
+
+.party-status-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.party-status-group .condition-strip {
+  margin-top: 0;
+}
+
+/* 折叠面板标题右侧的计数 */
+.panel-fold > summary .card-count {
+  flex: 0 0 auto;
+}
+
+/* ———————————————— 不可重复：缩写方块，有就亮 ———————————————— */
+
+.quickref-tiles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 5px;
+}
+
+.quickref-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: rgba(6, 10, 19, 0.5);
+  color: var(--parchment-dim);
+  font-size: 0.78rem;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+  cursor: grab;
+  user-select: none;
+}
+
+.quickref-tile.is-gold {
+  border-color: rgba(216, 173, 85, 0.3);
+}
+
+.quickref-tile.is-held {
+  border-color: rgba(111, 195, 143, 0.75);
+  background: rgba(37, 121, 78, 0.5);
+  color: #eafff1;
+  font-weight: 700;
+  box-shadow: 0 0 8px rgba(111, 195, 143, 0.35);
+}
+
+.quickref-tile.is-gold.is-held {
+  border-color: var(--gold);
+  background: rgba(150, 110, 30, 0.5);
+  color: var(--gold-bright);
+  box-shadow: 0 0 8px rgba(216, 173, 85, 0.4);
+}
+
+.quickref-tile.is-dragging {
+  opacity: 0.4;
+}
+
+.quickref-tile:focus-visible {
+  outline: 2px solid rgba(101, 201, 216, 0.76);
+  outline-offset: 1px;
+}
+
+.cursed-card h2 {
+  color: #f3a3a3;
+  border-left-color: #dc2626;
+}
+
+.cursed-card .quickref-cursed {
+  margin-bottom: 0;
+}
+
+/* ———————————————— Boss 机制：状态原文、速查、特殊状态提示 ———————————————— */
+
+.omen-status-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.omen-status-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.28);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.omen-status-list strong {
+  color: #f3b6cb;
+}
+
+.omen-status-hint {
+  color: var(--parchment);
+  font-weight: 650;
+}
+
+.omen-status-raw {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.boss-notes {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.boss-notes li {
+  padding: 5px 9px;
+  border-left: 2px solid var(--border);
+  border-radius: 0 4px 4px 0;
+  background: var(--card-2);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--parchment-soft);
+}
+
+.boss-notes li.is-alert {
+  border-left-color: var(--rose);
+  color: var(--parchment);
+}
+
+.boss-guide {
+  margin: 0 0 10px;
+}
+
+.boss-guide > summary {
+  color: var(--gold-bright);
+}
+
+.boss-guide-heading {
+  margin: 8px 0 3px;
+  font-size: 0.8rem;
+  color: var(--gold);
+}
+
+.boss-guide-list {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--parchment-soft);
+}
+
+.boss-guide-list strong {
+  color: var(--parchment);
+  font-weight: 650;
+}
+
+.omen-log-kind {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  color: var(--parchment-dim);
+}
+
+/* ———————————————— 敌人血条上的「这一回合能打掉多少」 ———————————————— */
+
+.enemy-bar {
+  position: relative;
+  height: 10px;
+}
+
+.enemy-bar-hit {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--gold-bright) 0 5px,
+    rgba(240, 214, 143, 0.55) 5px 10px
+  );
+  box-shadow: 0 0 6px rgba(240, 214, 143, 0.55);
+}
+
+.enemy-row.is-kill .enemy-bar-hit {
+  background: repeating-linear-gradient(135deg, #a8e5bd 0 5px, rgba(111, 195, 143, 0.6) 5px 10px);
+  box-shadow: 0 0 6px rgba(111, 195, 143, 0.6);
+}
+
+.enemy-hit-text {
+  margin-top: 3px;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold-bright);
+}
+
+.enemy-row.is-kill .enemy-hit-text {
+  color: #a8e5bd;
+  font-weight: 650;
+}
+
+/* ———————————————— 右栏：战斗系 / 导本系并排，可各自收成竖条 ———————————————— */
+
+#main {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+#panel {
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.panel-col {
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.panel-col + .panel-col {
+  border-left: 1px solid var(--gold-line);
+}
+
+.panel-col-toggle {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border-soft);
+  border-radius: 0;
+  background: rgba(216, 173, 85, 0.08);
+  box-shadow: none;
+  color: var(--gold-bright);
+  font-size: 0.86rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+/* 展开时箭头指向右（点了往右收），收起时指向左 */
+.panel-col-toggle::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+
+.panel-col-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: #33445c transparent;
+}
+
+.panel-col.is-collapsed {
+  width: 38px;
+}
+
+.panel-col.is-collapsed .panel-col-body {
+  display: none;
+}
+
+.panel-col.is-collapsed .panel-col-toggle {
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 0;
+}
+
+.panel-col.is-collapsed .panel-col-title {
+  writing-mode: vertical-rl;
+  letter-spacing: 0.3em;
+}
+
+.panel-col.is-collapsed .panel-col-toggle::after {
+  transform: rotate(-135deg);
+}
+
+.guide-total-card .mods-list {
+  margin-top: 0;
+}
+
+@media (max-width: 960px) {
+  #main {
+    grid-template-columns: 1fr;
+  }
+  .panel-col {
+    flex: 1;
+    width: auto;
+  }
+  .panel-col.is-collapsed {
+    flex: 0 0 38px;
+  }
+}
+
+/* debuff 导本并在「导本累计」面板里，排在加成合计下面 */
+.cursed-block {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.cursed-block .quickref-cursed {
+  margin-bottom: 0;
+}
+
+/* 预兆与特殊状态同时出现：分两段，并加粗外框提醒两边都要处理 */
+.omen-section + .omen-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(240, 214, 143, 0.35);
+}
+
+.omen-section-title {
+  margin: 6px 0 2px;
+  font-size: 0.76rem;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  color: var(--parchment-dim);
+}
+
+.omen-section .omen-conditions,
+.omen-section .omen-status-list {
+  margin-top: 2px;
+}
+
+.omen-alert.is-double {
+  border-width: 2px;
+  border-left-width: 4px;
+}
+
+/* 设置页里的路线详情与预兆记录 */
+.settings-group .route-stats,
+.settings-group .omen-log {
+  width: 100%;
+}
+
+/* 右下角：全图 / 附近 切换 */
+.map-zoom-btn.map-view-btn {
+  width: auto;
+  padding: 0 12px;
+  font-size: 0.82rem;
+  background: rgba(6, 10, 19, 0.5);
+  color: var(--parchment-soft);
+}
+
+.map-zoom-btn.map-view-btn.is-active {
+  border-color: var(--gold);
+  background: linear-gradient(180deg, rgba(216, 173, 85, 0.3), rgba(120, 85, 28, 0.2));
+  color: var(--gold-bright);
+  font-weight: 650;
+}
+
+/* ———————————————— 敌人以前的战绩 ———————————————— */
+
+.enemy-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 650;
+  line-height: 1.5;
+  color: var(--parchment-dim);
+  vertical-align: middle;
+}
+
+/* 一回合打死过：绿色 */
+.enemy-badge.is-one-turn {
+  border-color: rgba(111, 195, 143, 0.8);
+  background: rgba(37, 121, 78, 0.55);
+  color: #eafff1;
+  box-shadow: 0 0 6px rgba(111, 195, 143, 0.4);
+}
+
+.enemy-badge.is-killed {
+  border-color: var(--gold-line);
+  color: var(--gold-bright);
+}
+
+.enemy-log-table {
+  width: 100%;
+}
+
+.enemy-log-table th:first-child {
+  white-space: normal;
+}
+
+.enemy-log-type {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.enemy-log-table tr.is-one-turn th:first-child {
+  color: #a8e5bd;
+}
+
+.enemy-log-table td.is-one-turn-cell {
+  color: #a8e5bd;
+  font-weight: 700;
+}
+
+/* ———————————————— 敌人难度档位：血条颜色 ———————————————— */
+
+.enemy-row.is-tier-unknown .enemy-bar-fill {
+  background: linear-gradient(90deg, #6b7c93, #8b9bb0);
+}
+
+.enemy-row.is-tier-green .enemy-bar-fill {
+  background: linear-gradient(90deg, #3f9a68, #6fc38f);
+}
+
+.enemy-row.is-tier-yellow .enemy-bar-fill {
+  background: linear-gradient(90deg, #b8891f, #f0c552);
+}
+
+.enemy-row.is-tier-red .enemy-bar-fill {
+  background: linear-gradient(90deg, #a8324f, #e0607f);
+}
+
+.enemy-badge.is-tier-green {
+  border-color: rgba(111, 195, 143, 0.8);
+  background: rgba(37, 121, 78, 0.55);
+  color: #eafff1;
+}
+
+.enemy-badge.is-tier-yellow {
+  border-color: rgba(240, 197, 82, 0.8);
+  background: rgba(150, 110, 30, 0.45);
+  color: #fff3c9;
+}
+
+.enemy-badge.is-tier-red {
+  border-color: rgba(224, 96, 127, 0.85);
+  background: rgba(120, 30, 55, 0.55);
+  color: #ffd9e2;
+}
+
+.enemy-card .enemy-list:not(:empty) {
+  margin-bottom: 8px;
+}
+
+.enemy-card .boss-notes,
+.enemy-card .boss-guide {
+  margin-bottom: 6px;
+}
+
+.enemy-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 4px;
+}
+
+.enemy-meta .enemy-badge {
+  margin-left: 0;
+}
+
+.enemy-meta .enemy-hit-text {
+  margin-top: 0;
+}
+
+/* 队伍：上面一行前排，下面一行后排 */
+.party-hp {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.party-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+
+.party-row + .party-row {
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-soft);
+}
+
+.party-row-label {
+  writing-mode: vertical-rl;
+  font-size: 0.7rem;
+  letter-spacing: 0.15em;
+  color: var(--muted);
+}
+
+/* 一行最多 4 人，不换行：前排 4 人始终在同一行 */
+.party-row-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 68px));
+  gap: 5px;
+}
+
+/* 上次打死这个敌人用了几回合 */
+.enemy-badge.is-last {
+  border-color: var(--border);
+  color: var(--parchment-soft);
+}
+
+.enemy-badge.is-last.is-one-turn {
+  border-color: rgba(111, 195, 143, 0.8);
+  background: rgba(37, 121, 78, 0.55);
+  color: #eafff1;
+}
+
+.kill-text:empty {
+  display: none;
+}
+
+/* 敌人归类：类别 + 等级 + 与本局同类一回合击杀的血量对比 */
+.enemy-category {
+  margin-top: 4px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--parchment-soft);
+}
+
+.enemy-log-table tr.enemy-log-group th {
+  padding-top: 10px;
+  text-align: left;
+  font-weight: 700;
+  color: var(--gold-bright);
+  border-bottom: 1px solid var(--border);
+  white-space: normal;
+}
+
+/* ———————————————— 按攻击后的 hit 数（后排右边的空位） ———————————————— */
+
+.party-row.is-back {
+  grid-template-columns: auto auto minmax(0, 1fr);
+}
+
+/* 后排有几人就占几格，剩下的宽度留给命中统计 */
+.party-row.is-back .party-row-tiles {
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: 68px;
+}
+
+.attack-info {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  align-content: center;
+  min-width: 0;
+}
+
+.party-hp > .attack-info {
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-soft);
+}
+
+.attack-info-empty {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.attack-tag {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 3px 7px;
+  border: 1px solid var(--border-soft);
+  border-left-width: 3px;
+  border-radius: 4px;
+  background: var(--card-2);
+  line-height: 1.3;
+}
+
+.attack-tag-label {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.attack-tag strong {
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attack-tag.is-hit { border-left-color: var(--cyan); }
+.attack-tag.is-special { border-left-color: var(--gold); }
+.attack-tag.is-ability { border-left-color: var(--green); }
+.attack-tag.is-total { border-left-color: var(--rose); }
+
+.attack-tag.is-hit strong {
+  font-size: 1.05rem;
+  color: var(--cyan);
+}
+
+/* 紧凑数字后，hit 统计的标签不再需要换行或截断 */
+.attack-tag-label {
+  white-space: nowrap;
+}
+
+.attack-tag strong {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+[title] > strong,
+.enemy-hp[title],
+.damage-table td[title],
+.estimate-list dd[title],
+#damage-record[title]:not([title=""]) {
+  cursor: help;
+}
+
+/* 窗口窄的时候：后排旁边放不下 hit 统计，就整块换到下一行并排成一排 */
+.party-row.is-back {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.party-row.is-back > .attack-info {
+  flex: 1 1 140px;
+  min-width: 140px;
+  grid-template-columns: repeat(auto-fit, minmax(66px, 1fr));
 }

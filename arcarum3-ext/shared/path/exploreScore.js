@@ -77,6 +77,11 @@ function getExploreWeights(opts = {}) {
  * @property {Partial<typeof EXPLORE_WEIGHTS>} [weights] 自定义各类评分
  * @property {import('../miasma.js').MiasmaCenter | null} [miasmaCenter]
  *   毒圈开启时传入：软性偏好留在白圈内（惩罚 is_shrinking），不强制去圆心
+ * @property {Map<number, number> | null} [nodeScores]
+ *   个别节点的分数覆盖（节点号 → 分数），优先于按类型给的分。
+ *   用来让商店的价值随手里的钱和剩余库存变化。
+ * @property {ReturnType<typeof makeSweepBias>} [downBias]
+ *   makeSweepBias() / makeDownBias() 的结果：沿偏好的方向走给奖励分
  */
 
 /**
@@ -120,6 +125,16 @@ export function scoreForType(displayType, opts = {}) {
 }
 
 /**
+ * 进入某个节点的分数：有逐格覆盖用覆盖值，否则按类型。
+ * @param {{ id: number, displayType: number }} node
+ * @param {ExploreScoreOptions} opts
+ */
+export function scoreForNode(node, opts = {}) {
+  const override = opts.nodeScores?.get?.(Number(node?.id));
+  return override != null ? override : scoreForType(node?.displayType, opts);
+}
+
+/**
  * 剩余步乐观下界用的最低单格分（最负）
  * @param {ExploreScoreOptions} [opts]
  */
@@ -142,7 +157,168 @@ export function minPossibleStepScore(opts = {}) {
     const s = scoreForType(t, opts);
     if (Number.isFinite(s) && s < m) m = s;
   }
+  // 逐格覆盖里可能有比任何类型都更负的分（钱多时的商店）
+  for (const s of opts.nodeScores?.values?.() || []) {
+    if (Number.isFinite(s) && s < m) m = s;
+  }
   return m;
+}
+
+/** 方向偏置：每沿着偏好的方向走满一个「典型纵向落差」给的奖励分（略高于空地惩罚，穿空地也不亏） */
+export const DOWN_BIAS_WEIGHT = 12;
+/** 向上阶段里「往地图中间靠」的权重占纵向权重的比例 */
+export const CENTER_BIAS_RATIO = 0.5;
+/** 走回已经走过的节点时的额外惩罚，占纵向权重的比例：同样是空地，优先走没走过的 */
+export const REVISIT_PENALTY_RATIO = 0.25;
+/** 距最低 / 最高节点不足这么多个典型落差，视为已到边缘 */
+export const DOWN_EDGE_BAND_STEPS = 0.5;
+
+/** 地图的纵向范围、中线和典型的一步落差 */
+function mapGeometry(map) {
+  const byId = new Map(map.nodes.map((node) => [node.id, node]));
+  // 典型的「一步纵向」落差：只看以纵向为主的边，这样正上 / 正下方的一步总能拿满奖励，
+  // 不会因为地图横向边更长而被稀释到抵不过空地惩罚。
+  const drops = [];
+  const lengths = [];
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const node of map.nodes) {
+    if (!Number.isFinite(node.y)) continue;
+    minY = Math.min(minY, node.y);
+    maxY = Math.max(maxY, node.y);
+    if (Number.isFinite(node.x)) {
+      minX = Math.min(minX, node.x);
+      maxX = Math.max(maxX, node.x);
+    }
+    for (const adj of node.adjacentIds || []) {
+      const other = byId.get(adj);
+      if (!other || other.id <= node.id) continue;
+      if (!Number.isFinite(other.x) || !Number.isFinite(other.y)) continue;
+      const dx = Math.abs(other.x - node.x);
+      const dy = Math.abs(other.y - node.y);
+      if (dx + dy > 0) lengths.push(Math.hypot(dx, dy));
+      if (dy > 0 && dy >= dx) drops.push(dy);
+    }
+  }
+  const samples = drops.length ? drops : lengths;
+  if (!samples.length) return null;
+  samples.sort((a, b) => a - b);
+  return {
+    byId,
+    unit: samples[Math.floor(samples.length / 2)],
+    minY,
+    maxY,
+    centerX: Number.isFinite(minX) ? (minX + maxX) / 2 : null,
+  };
+}
+
+/**
+ * 向下优先的上下文：当前位置到达下边缘后返回 null（偏置关闭）。
+ * position_y 为游戏 UI 像素坐标，越大越靠下。
+ *
+ * @param {{ nodes: { id: number, adjacentIds: number[], x?: number, y?: number }[] }} map
+ * @param {number} startId
+ * @param {number} [weight]
+ * @returns {{ weight: number, unit: number, direction: 1, maxY: number } | null}
+ */
+export function makeDownBias(map, startId, weight = DOWN_BIAS_WEIGHT) {
+  const bias = makeSweepBias(map, startId, { weight, upAfterEdge: false });
+  return bias?.phase === "down" ? bias : null;
+}
+
+/**
+ * 缩圈位置还不知道时的扫图方向：
+ *   1. down：先往下走到地图下边缘；
+ *   2. up：到过下边缘之后掉头，往上并往地图中间靠——走的都是没走过的地方，
+ *      而且人在中间，缩圈出现在哪边都不用绕远；
+ *   3. 到了上边缘、或者缩圈已经出现：返回 null，不再偏向任何方向。
+ *
+ * 「到过下边缘」不靠记忆：当前位置在下边缘带内，或者已访问的节点里有落在下边缘带内的。
+ *
+ * @param {object} map toRouteMap() 的结果
+ * @param {number} startId
+ * @param {{ weight?: number, downFirst?: boolean, upAfterEdge?: boolean,
+ *           visitedIds?: Iterable<number>, miasmaActive?: boolean }} [options]
+ *   downFirst=false：跳过第 1 阶段，从一开始就往上、往中间走
+ * @returns {{ phase: 'down' | 'up', weight: number, unit: number, direction: 1 | -1,
+ *             centerX: number | null, centerWeight: number, maxY: number, minY: number,
+ *             visited: Set<number>, revisitPenalty: number } | null}
+ */
+export function makeSweepBias(map, startId, options = {}) {
+  const weight = Number(options.weight ?? DOWN_BIAS_WEIGHT);
+  if (!Number.isFinite(weight) || weight <= 0 || options.miasmaActive) return null;
+  const geometry = mapGeometry(map);
+  if (!geometry) return null;
+  const start = geometry.byId.get(startId);
+  if (!start || !Number.isFinite(start.y)) return null;
+
+  const band = geometry.unit * DOWN_EDGE_BAND_STEPS;
+  const atBottom = (node) => Number.isFinite(node?.y) && node.y >= geometry.maxY - band;
+  const atTop = (node) => Number.isFinite(node?.y) && node.y <= geometry.minY + band;
+  const downFirst = options.downFirst !== false;
+  const upAfterEdge = options.upAfterEdge !== false;
+
+  const visited = new Set([...(options.visitedIds || [])].map(Number));
+  let reachedBottom = !downFirst || atBottom(start);
+  if (!reachedBottom) {
+    for (const id of visited) {
+      if (atBottom(geometry.byId.get(id))) {
+        reachedBottom = true;
+        break;
+      }
+    }
+  }
+
+  const base = {
+    weight,
+    unit: geometry.unit,
+    maxY: geometry.maxY,
+    minY: geometry.minY,
+    visited,
+    revisitPenalty: weight * REVISIT_PENALTY_RATIO,
+  };
+  if (!reachedBottom) {
+    return { ...base, phase: "down", direction: 1, centerX: null, centerWeight: 0 };
+  }
+  if (!upAfterEdge || atTop(start)) return null;
+  return {
+    ...base,
+    phase: "up",
+    direction: -1,
+    centerX: geometry.centerX,
+    centerWeight: weight * CENTER_BIAS_RATIO,
+  };
+}
+
+/** 一步里方向偏置最多能给多少奖励分（剪枝用） */
+export function maxSweepBonus(bias) {
+  return bias ? bias.weight + (bias.centerWeight || 0) : 0;
+}
+
+/**
+ * 单步的方向偏置分：沿偏好的方向为负（奖励），反方向为正（惩罚），单项封顶 ±权重。
+ * 向上阶段再加一项：横向离地图中线更近给奖励，更远给惩罚。
+ * 走回已经走过的节点另加一小笔惩罚，尽量不重复走。
+ *
+ * @param {{ x?: number, y?: number }} from
+ * @param {{ id?: number, x?: number, y?: number }} to
+ * @param {ReturnType<typeof makeSweepBias>} bias
+ */
+export function downStepScore(from, to, bias) {
+  if (!bias || !from || !to) return 0;
+  if (!Number.isFinite(from.y) || !Number.isFinite(to.y)) return 0;
+  const clamp = (value) => Math.max(-1, Math.min(1, value));
+  const direction = bias.direction ?? 1;
+  let score = -bias.weight * clamp((direction * (to.y - from.y)) / bias.unit);
+  if (bias.centerWeight && bias.centerX != null && Number.isFinite(from.x) && Number.isFinite(to.x)) {
+    const closer = Math.abs(from.x - bias.centerX) - Math.abs(to.x - bias.centerX);
+    score -= bias.centerWeight * clamp(closer / bias.unit);
+  }
+  if (bias.revisitPenalty && bias.visited?.has(Number(to.id))) score += bias.revisitPenalty;
+  // 避免返回 -0
+  return score === 0 ? 0 : score;
 }
 
 /**
@@ -175,8 +351,9 @@ export function findLowestScorePath(map, startId, numPoints, opts = {}) {
 
   const day = Number(opts.day) >= 2 ? 2 : 1;
   const weights = getExploreWeights(opts);
-  const scoreOpts = { day, weights };
+  const scoreOpts = { day, weights, nodeScores: opts.nodeScores || null };
   const center = opts.miasmaCenter || map.miasmaCenter || null;
+  const down = opts.downBias || null;
 
   const byId = new Map(map.nodes.map((node) => [node.id, node]));
   if (!byId.has(startId) || byId.get(startId).displayType === NODE_TYPE.BOSS) {
@@ -184,8 +361,9 @@ export function findLowestScorePath(map, startId, numPoints, opts = {}) {
   }
 
   const maxSteps = n - 1; // 最多进入 maxSteps 格
-  // 剪枝下界：毒圈最好情况 = 全程留在白圈内（+0），不按「朝圆心」给负 slack
-  const minStep = minPossibleStepScore(scoreOpts);
+  // 剪枝下界：毒圈最好情况 = 全程留在白圈内（+0），不按「朝圆心」给负 slack；
+  // 向下偏置最好情况 = 每步都拿满 -weight
+  const minStep = minPossibleStepScore(scoreOpts) - maxSweepBonus(down);
 
   /** @type {ExploreResult | null} */
   let best = null;
@@ -209,12 +387,12 @@ export function findLowestScorePath(map, startId, numPoints, opts = {}) {
           break;
         }
         seen.add(fp[i]);
-        const stepScore = scoreForType(b.displayType, scoreOpts);
+        const stepScore = scoreForNode(b, scoreOpts);
         if (!Number.isFinite(stepScore)) {
           ok = false;
           break;
         }
-        prefixScore += stepScore;
+        prefixScore += stepScore + downStepScore(a, b, down);
         if (center) {
           prefixScore += miasmaSoftScoreOnEnter(b, center);
         }
@@ -229,8 +407,7 @@ export function findLowestScorePath(map, startId, numPoints, opts = {}) {
     let rewardCount = 0;
     let penaltyCount = 0;
     for (let i = 1; i < path.length; i++) {
-      const t = byId.get(path[i])?.displayType;
-      const sc = scoreForType(t, scoreOpts);
+      const sc = scoreForNode(byId.get(path[i]), scoreOpts);
       if (sc < 0) rewardCount++;
       if (sc > 0) penaltyCount++;
     }
@@ -285,7 +462,7 @@ export function findLowestScorePath(map, startId, numPoints, opts = {}) {
       })
       .map((v) => {
         const toN = byId.get(v);
-        let s = scoreForType(toN.displayType, scoreOpts);
+        let s = scoreForNode(toN, scoreOpts) + downStepScore(node, toN, down);
         // 毒圈：进入 is_shrinking 加分（更差）；圈内游走不加，不强制去圆心
         if (center) {
           s += miasmaSoftScoreOnEnter(toN, center);
@@ -324,8 +501,9 @@ export const REPLAN_STICKINESS = 8;
 export function scoreExplorePath(map, path, opts = {}) {
   const day = Number(opts.day) >= 2 ? 2 : 1;
   const weights = getExploreWeights(opts);
-  const scoreOpts = { day, weights };
+  const scoreOpts = { day, weights, nodeScores: opts.nodeScores || null };
   const center = opts.miasmaCenter || map.miasmaCenter || null;
+  const down = opts.downBias || null;
   const byId = new Map(map.nodes.map((node) => [node.id, node]));
   if (
     !Array.isArray(path) ||
@@ -349,11 +527,11 @@ export function scoreExplorePath(map, path, opts = {}) {
       return { score, rewardCount, penaltyCount, valid: false };
     }
     seen.add(path[i]);
-    const sc = scoreForType(b.displayType, scoreOpts);
+    const sc = scoreForNode(b, scoreOpts);
     if (!Number.isFinite(sc)) {
       return { score, rewardCount, penaltyCount, valid: false };
     }
-    score += sc;
+    score += sc + downStepScore(a, b, down);
     if (sc < 0) rewardCount++;
     if (sc > 0) penaltyCount++;
     if (center) {

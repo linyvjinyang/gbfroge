@@ -3,12 +3,13 @@
  * capture path used by the reference extension.
  */
 (function () {
-  const FLAG = "__GBF_ARCARUM3_MAP_HOOK__";
+  const FLAG = "__GBFROGE_HOOK__";
   if (window[FLAG]) return;
   window[FLAG] = true;
 
-  const SOURCE = "gbf-arcarum3-map-hook";
-  const MAX_ATTEMPTS = 100;
+  const SOURCE = "gbfroge-hook";
+  // 游戏加载慢的时候 jQuery 可能十几秒才出现：等够 2 分钟再放弃
+  const MAX_ATTEMPTS = 1200;
   const POLL_INTERVAL_MS = 100;
   let attempts = 0;
 
@@ -18,7 +19,10 @@
       url.includes("/arcarum3/") ||
       url.includes("/rest/arcarum3/") ||
       /\/result(?:multi)?\/content\/index/i.test(url) ||
-      /\/socket\/query/i.test(url)
+      /\/socket\/query/i.test(url) ||
+      // 盘子（编成）与战斗：敌人血量、敌我状态、实测伤害
+      /\/party\/deck/i.test(url) ||
+      /\/rest\/(?:raid|multiraid)\//i.test(url)
     );
   }
 

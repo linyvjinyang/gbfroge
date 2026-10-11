@@ -446,7 +446,7 @@ export function createGuidebookView({ onRender } = {}) {
       if (!response?.ok) throw new Error(response?.error || "清除失败");
       render(response.state || state);
     } catch (error) {
-      console.error("[gbf-map] failed to clear guidebook selection", error);
+      console.error("[gbfroge] failed to clear guidebook selection", error);
     } finally {
       clearInFlight = false;
       renderLiveSelection();

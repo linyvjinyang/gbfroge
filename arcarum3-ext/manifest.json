@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "arcarum3-ext",
-  "version": "0.2.2",
-  "description": "实时记录转世沙盒地图与导本，提供独立地图窗口和本地导本目录。",
+  "name": "gbfroge",
+  "version": "0.4.11",
+  "description": "碧蓝幻想肉鸽助手：实时地图与寻路、导本记录、盘子与当前伤害。",
   "permissions": ["storage", "sidePanel", "windows", "tabs"],
   "host_permissions": [
     "https://game.granbluefantasy.jp/*",
@@ -36,7 +36,7 @@
     "default_path": "sidepanel/index.html"
   },
   "action": {
-    "default_title": "arcarum3-ext",
+    "default_title": "gbfroge",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

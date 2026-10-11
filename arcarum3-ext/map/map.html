@@ -35,123 +35,196 @@
           aria-controls="guidebook-view"
           data-window-view="guidebooks"
         >
-          导本
+          导本 · 盘子
           <span id="guidebook-tab-count" class="window-tab-count" hidden>0</span>
         </button>
+        <button
+          id="window-tab-settings"
+          class="window-view-tab"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="settings-view"
+          data-window-view="settings"
+        >设置</button>
       </div>
+    </div>
+    <div class="right">
       <span id="progress-line" class="progress-line">第 — 天 · 第 — 回合</span>
+      <span id="progress-point" class="badge" title="塞菲拉币">币 —</span>
       <span id="badge" class="badge">无数据</span>
     </div>
-    <div id="map-toolbar-controls" class="right">
-      <label class="chk slider-chk" title="调节底图亮度">
-        亮度
-        <input type="range" id="bg-bright" min="60" max="150" value="100" step="5" />
-        <span id="bg-bright-val" class="slider-val">100%</span>
-      </label>
-      <label class="chk"><input type="checkbox" id="show-empty" checked /> 空白点</label>
-      <label class="chk"><input type="checkbox" id="show-ids" /> 节点 ID</label>
-      <label class="chk"><input type="checkbox" id="show-legend" checked /> 左下图例</label>
-      <button type="button" id="btn-fit">适应窗口</button>
-      <button type="button" id="btn-100">100%</button>
-      <button type="button" id="btn-center">定位自己</button>
-      <span id="zoom-label">100%</span>
-    </div>
+  </div>
+
+  <!-- 本局特殊事件：点一下直接寻路过去 -->
+  <div id="special-bar" class="special-bar" aria-label="本局特殊事件">
+    <span class="special-bar-label">本局特殊事件</span>
+    <div id="special-list" class="special-list"></div>
+    <span id="special-empty" class="special-empty">进图后显示</span>
   </div>
 
   <div id="main" role="tabpanel" aria-labelledby="window-tab-map">
     <div id="map-column">
       <canvas id="canvas"></canvas>
 
-      <!-- 左下角图例（可筛选高亮 / 可显隐） -->
-      <div id="legend-dock" class="legend-dock" aria-label="节点图例">
-        <button type="button" id="btn-legend-collapse" class="legend-toggle" title="收起/展开图例">图例</button>
-        <div id="legend-bar" class="legend-bar"></div>
+      <!-- 节点详情：悬停在图标上时浮出；点击节点可固定 -->
+      <div id="node-tip" class="node-tip" role="tooltip" hidden>
+        <div id="detail" class="node-detail"></div>
       </div>
 
-      <div class="map-zoom-controls" aria-label="缩放">
-        <button type="button" id="btn-zoom-out" class="map-zoom-btn">−</button>
+      <!-- 左上：寻路 -->
+      <div class="route-bar" aria-label="寻路">
+        <div class="route-bar-row">
+          <button type="button" id="btn-explore-gen" class="btn primary-ish">生成路径</button>
+          <button type="button" id="btn-route-clear" class="btn ghost" disabled>清除</button>
+          <div class="route-presets" role="group" aria-label="目标寻路的路线权重">
+            <button type="button" class="btn-preset is-active" data-preset="short">最短</button>
+            <button type="button" class="btn-preset" data-preset="reward">收益</button>
+            <button type="button" class="btn-preset" data-preset="safe">安全</button>
+          </div>
+        </div>
+        <div id="quick-targets" class="route-bar-row" role="group" aria-label="快捷目标"></div>
+      </div>
+
+      <!-- 左下：图例（默认隐藏，在设置里打开）+ 定位自己 -->
+      <div class="map-corner">
+        <div id="legend-dock" class="legend-dock" aria-label="节点图例" hidden>
+          <button type="button" id="btn-legend-collapse" class="legend-toggle" title="收起/展开图例">图例</button>
+          <div id="legend-bar" class="legend-bar"></div>
+        </div>
+        <button type="button" id="btn-center" class="btn map-corner-btn">定位自己</button>
+      </div>
+
+      <div class="map-zoom-controls" role="group" aria-label="地图视图">
+        <button type="button" id="btn-view-full" class="map-zoom-btn map-view-btn" aria-pressed="true"
+          title="整张地图铺满窗口">全图</button>
+        <button type="button" id="btn-view-near" class="map-zoom-btn map-view-btn" aria-pressed="false"
+          title="放大到当前位置周围几步，移动后自动跟随">附近</button>
         <span id="zoom-label-float" class="map-zoom-label">100%</span>
-        <button type="button" id="btn-zoom-in" class="map-zoom-btn">+</button>
       </div>
     </div>
 
     <aside id="panel">
-      <section class="panel-block progress-card">
-        <h2>攻略进度</h2>
-        <ul class="progress-rows">
-          <li class="progress-row">
-            <span class="progress-label">日程</span>
-            <span id="progress-schedule" class="progress-value">第 — 天 · 第 — 回合</span>
-          </li>
-          <li class="progress-row">
-            <span class="progress-label">货币</span>
-            <span id="progress-point" class="progress-value">—</span>
-          </li>
-          <li class="progress-row">
-            <span class="progress-label">瘴气</span>
-            <span id="progress-miasma" class="progress-value">—</span>
-          </li>
-        </ul>
-        <p class="progress-note">回合 = total_turn+1；「天」游戏无字段，按 hint/回合启发式（与贤者助手一致）。</p>
-      </section>
-
-      <section class="panel-block">
-        <h2>节点详情</h2>
-        <div id="detail" class="node-detail">
-          <p class="node-detail-empty">点击节点查看详情。
-
-右键：设为目标 / 添加途经点。
-拖拽平移 · 滚轮缩放 · 双击适应窗口。</p>
+      <!-- 战斗系与导本系并排；每一列都可以收成一条竖条 -->
+      <section class="panel-col" data-col="battle" aria-label="战斗">
+        <button type="button" class="panel-col-toggle" aria-expanded="true" title="收起 / 展开这一列">
+          <span class="panel-col-title">战斗</span>
+        </button>
+        <div class="panel-col-body">
+        <!-- 预兆是需要立刻看到的提示，不放进折叠里 -->
+        <div id="omen-alert" class="omen-alert" role="alert" hidden>
+          <div class="omen-alert-head">
+            <strong id="omen-alert-title">预兆</strong>
+            <span id="omen-alert-tag" class="omen-tag" hidden>首次记录</span>
+          </div>
+          <section id="omen-alert-omens" class="omen-section" hidden>
+            <h3 class="omen-section-title">预兆 · 解除条件</h3>
+            <ul id="omen-alert-list" class="omen-conditions"></ul>
+          </section>
+          <section id="omen-alert-statuses" class="omen-section" hidden>
+            <h3 class="omen-section-title">特殊状态 · 解除条件</h3>
+            <ul id="omen-alert-status" class="omen-status-list"></ul>
+          </section>
+          <p id="omen-alert-note" class="omen-note"></p>
         </div>
-        <details id="node-debug-wrap" class="node-debug">
-          <summary>调试字段</summary>
-          <pre id="detail-debug" class="node-detail-debug">—</pre>
+
+          <!-- 最上面：敌人血量、身上的规则类状态、机制速查；血条颜色表示难度档位 -->
+          <section class="panel-block enemy-card" aria-labelledby="enemy-title">
+            <header class="card-head">
+              <h2 id="enemy-title">敌人</h2>
+              <span id="damage-turn" class="card-count">无战斗</span>
+            </header>
+            <div id="damage-enemies" class="enemy-list"></div>
+            <p id="damage-empty" class="card-empty">进入战斗后显示敌人血量和状态。</p>
+            <ul id="boss-notes" class="boss-notes" hidden></ul>
+            <details id="boss-guide" class="inline-fold boss-guide" data-fold="boss-guide" hidden>
+              <summary id="boss-guide-title">机制速查</summary>
+              <div id="boss-guide-body" class="boss-guide-body"></div>
+            </details>
+            <p id="enemy-tier-legend" class="card-note" hidden></p>
+          </section>
+
+        <!-- 队伍血量（常驻）+ 可折叠的战斗状态 -->
+        <section class="panel-block party-card" aria-labelledby="party-title">
+          <header class="card-head">
+            <h2 id="party-title">队伍</h2>
+            <span id="party-source" class="card-count"></span>
+          </header>
+          <p id="party-empty" class="card-empty">进图或进入战斗后显示血量。</p>
+          <div id="party-hp" class="party-hp"></div>
+          <details id="party-status-fold" class="inline-fold" data-fold="party-status" hidden>
+            <summary>战斗状态</summary>
+            <div id="party-status" class="party-status"></div>
+          </details>
+        </section>
+
+        <details class="panel-block panel-fold damage-card" data-fold="battle" open>
+          <summary>
+            <h2 id="damage-title">伤害</h2>
+          </summary>
+          <div id="damage-kill" class="kill-box"
+            title="按下攻击后这一回合打出的全部伤害（通常攻击、奥义、连锁、追加伤害），取本局所有战斗里的最高值。">
+            <div class="kill-head">
+              <span class="kill-label">攻击回合记录</span>
+              <strong id="damage-record" class="kill-value">—</strong>
+              <button type="button" id="btn-record-reset" class="btn ghost btn-mini" disabled
+                title="清零本局的攻击回合记录">清零</button>
+            </div>
+            <p id="damage-kill-text" class="kill-text">按一次攻击后开始记录。</p>
+          </div>
+          <table id="damage-table" class="damage-table" hidden>
+            <thead>
+              <tr>
+                <th scope="col">类型</th>
+                <th scope="col">最近单发</th>
+                <th scope="col">本场最高</th>
+                <th scope="col" title="只含导本加成（同类加算），不含武器和角色自带的上限">上限参考</th>
+              </tr>
+            </thead>
+            <tbody id="damage-rows"></tbody>
+          </table>
+          <p id="damage-last" class="card-note" hidden></p>
+          <dl id="damage-estimate" class="estimate-list" hidden></dl>
         </details>
+        </div>
       </section>
 
-      <section class="panel-block route-card">
-        <h2>目标寻路</h2>
-        <div class="route-presets" role="group" aria-label="路线权重">
-          <button type="button" class="btn-preset is-active" data-preset="short">最短</button>
-          <button type="button" class="btn-preset" data-preset="reward">收益</button>
-          <button type="button" class="btn-preset" data-preset="safe">安全</button>
-        </div>
-        <div class="route-actions">
-          <button type="button" id="btn-route-clear" class="btn ghost" disabled>清除路线</button>
-        </div>
-        <p id="route-hint" class="route-hint">
-          左键查看；右键：第一个点=终点，之后=途经。路径为一条无回环折线。
-        </p>
-        <dl id="route-stats" class="route-stats" hidden></dl>
-      </section>
-
-      <section class="panel-block explore-card">
-        <h2>收益扫路（无目标）</h2>
-        <div class="route-actions">
-          <button type="button" id="btn-explore-gen" class="btn primary-ish">生成路径</button>
-          <button type="button" id="btn-explore-clear" class="btn ghost" disabled>清除路径</button>
-        </div>
-        <p class="route-hint" id="explore-score-legend">累计分越低，路线优先级越高。</p>
-        <label class="explore-slider-label" for="explore-points">
-          点数上限 ≤ <strong id="explore-points-val">20</strong>
-        </label>
-        <input
-          type="range"
-          id="explore-points"
-          min="5"
-          max="20"
-          value="20"
-          step="1"
-        />
-        <details class="explore-score-settings" open>
-          <summary>自定义事件评分</summary>
-          <div id="explore-score-controls" class="explore-score-controls"></div>
+      <section class="panel-col" data-col="guide" aria-label="导本">
+        <button type="button" class="panel-col-toggle" aria-expanded="true" title="收起 / 展开这一列">
+          <span class="panel-col-title">导本</span>
+        </button>
+        <div class="panel-col-body">
+        <details class="panel-block panel-fold guide-total-card" data-fold="guide-total" open>
+          <summary title="当前持有导本带来的加成合计（同类加算）">
+            <h2>导本累计</h2>
+            <span id="guide-total-count" class="card-count"></span>
+          </summary>
+          <p id="guide-total-empty" class="card-empty">还没有可以合计的导本加成。</p>
+          <dl id="damage-mods" class="mods-list" hidden></dl>
+          <p id="damage-mods-note" class="card-note" hidden></p>
+          <div id="quickref-cursed-wrap" class="cursed-block" hidden>
+            <h3 id="quickref-cursed-title" class="quickref-heading is-cursed">debuff 导本</h3>
+            <ul id="quickref-cursed" class="quickref-cursed"></ul>
+          </div>
         </details>
-        <p id="explore-hint" class="route-hint">
-          从当前位置出发，在上限内选总分最低的简单路径（可短于上限，不必凑满）。
-          沿绿线移动只裁剪；再点生成带粘性，避免每步改道。
-        </p>
-        <dl id="explore-stats" class="route-stats" hidden></dl>
+
+        <details class="panel-block panel-fold quickref-card" data-fold="quickref-tiles" open>
+          <summary title="方块亮起表示已持有；没用的拖出去即可剔除，在设置里恢复">
+            <h2>不可重复</h2>
+            <span id="quickref-tiles-count" class="card-count"></span>
+          </summary>
+          <p id="quickref-empty" class="card-empty">读到导本数据后显示。</p>
+          <ul id="quickref-tiles" class="quickref-tiles"></ul>
+        </details>
+
+        <details class="panel-block panel-fold quickref-card" data-fold="quickref-gold">
+          <summary title="已持有的排在前面；没用的拖出去或点 × 即可剔除，在设置里恢复">
+            <h2>金导本</h2>
+            <span id="quickref-gold-count" class="card-count"></span>
+          </summary>
+          <ul id="quickref-gold" class="quickref-list"></ul>
+        </details>
+        </div>
       </section>
     </aside>
   </div>
@@ -182,6 +255,17 @@
           class="guidebook-column guidebook-live-panel"
           aria-labelledby="book-live-title"
         >
+          <section class="build-card" aria-labelledby="build-title">
+            <header class="card-head">
+              <h2 id="build-title">盘子</h2>
+              <span id="build-count" class="card-count">未读取</span>
+            </header>
+            <p id="build-empty" class="card-empty">在游戏里打开编成页面即可读取盘子；每次打开或刷新都会更新。肉鸽内读到的就是封印生效后的数值。</p>
+            <div id="build-grid" class="weapon-grid" hidden></div>
+            <div id="build-summons" class="summon-row" hidden></div>
+            <div id="build-effects" class="effect-list" hidden></div>
+          </section>
+
           <header class="guidebook-column-header">
             <div class="guidebook-column-title">
               <h2 id="book-live-title">本次选择</h2>
@@ -245,6 +329,100 @@
           <div id="guidebook-list" class="guidebook-list" aria-live="polite"></div>
         </section>
       </div>
+    </div>
+  </section>
+
+  <section
+    id="settings-view"
+    class="settings-view"
+    role="tabpanel"
+    aria-labelledby="window-tab-settings"
+    hidden
+  >
+    <div class="settings-shell">
+      <section class="panel-block settings-group" aria-labelledby="settings-display-title">
+        <h2 id="settings-display-title">显示</h2>
+        <label class="chk"><input type="checkbox" id="auto-fit" checked /> 自适应窗口（窗口大小变化时按当前的全图 / 附近重新摆放地图）</label>
+        <label class="chk slider-chk" title="调节底图亮度">
+          底图亮度
+          <input type="range" id="bg-bright" min="60" max="150" value="100" step="5" />
+          <span id="bg-bright-val" class="slider-val">100%</span>
+        </label>
+        <label class="chk"><input type="checkbox" id="show-empty" checked /> 显示空白点</label>
+        <label class="chk"><input type="checkbox" id="show-ids" /> 显示节点 ID</label>
+        <label class="chk"><input type="checkbox" id="show-legend" /> 显示左下图例</label>
+      </section>
+
+      <section class="panel-block settings-group explore-card" aria-labelledby="settings-route-title">
+        <h2 id="settings-route-title">寻路</h2>
+        <label class="chk" title="地图上有未访问的浮空城研究者、且当前没有路线时，自动把它设为目标">
+          <input type="checkbox" id="auto-researcher" checked /> 开局优先寻路到浮空城研究者
+        </label>
+        <label class="explore-slider-label" for="explore-points">
+          「生成路径」点数上限 ≤ <strong id="explore-points-val">20</strong>
+        </label>
+        <input
+          type="range"
+          id="explore-points"
+          min="5"
+          max="20"
+          value="20"
+          step="1"
+        />
+        <div class="explore-down">
+          <label class="chk" title="缩圈出现前：到达地图下边缘之前，向下走的每一步给奖励分">
+            <input type="checkbox" id="explore-down" checked /> 先向下走到地图边缘
+          </label>
+          <label class="chk" title="到过下边缘之后掉头：向上走、并往地图中间靠。走的是没走过的地方，缩圈出现在哪边都不用绕远。不勾上一项时，从一开始就这样走">
+            <input type="checkbox" id="explore-up" checked /> 之后向上并靠中间走
+          </label>
+          <label class="explore-down-weight" for="explore-down-weight">
+            每步奖励
+            <input type="number" id="explore-down-weight" min="0" max="50" step="1" value="12" />
+          </label>
+        </div>
+        <p class="route-hint" id="explore-score-legend">累计分越低，路线优先级越高。</p>
+        <details class="explore-score-settings">
+          <summary>自定义事件评分</summary>
+          <div id="explore-score-controls" class="explore-score-controls"></div>
+        </details>
+      </section>
+
+      <section class="panel-block settings-group" aria-labelledby="route-info-title">
+        <h2 id="route-info-title">路线详情</h2>
+        <p id="route-hint" class="route-hint">右键节点设为目标，再右键其他节点加途经。</p>
+        <dl id="route-stats" class="route-stats" hidden></dl>
+        <p id="explore-hint" class="route-hint">「生成路径」从当前位置扫一条收益最高的路线。</p>
+        <dl id="explore-stats" class="route-stats" hidden></dl>
+      </section>
+
+      <section class="panel-block settings-group" aria-labelledby="omen-log-title">
+        <h2 id="omen-log-title">预兆记录</h2>
+        <p id="omen-log-empty" class="card-empty">战斗里出现过的预兆和特殊状态会按敌人记在这里，跨局保留。</p>
+        <div id="omen-log" class="omen-log"></div>
+      </section>
+
+      <section class="panel-block settings-group" aria-labelledby="enemy-log-title">
+        <h2 id="enemy-log-title">敌人记录</h2>
+        <p id="enemy-log-empty" class="card-empty">肉鸽战斗里遇到的敌人会记在这里（事件敌人、强敌、Boss 都算），跨局保留。</p>
+        <table id="enemy-log-table" class="damage-table enemy-log-table" hidden>
+          <thead>
+            <tr>
+              <th scope="col">敌人</th>
+              <th scope="col">血量</th>
+              <th scope="col">遇到</th>
+              <th scope="col">最快击杀</th>
+            </tr>
+          </thead>
+          <tbody id="enemy-log-rows"></tbody>
+        </table>
+      </section>
+
+      <section class="panel-block settings-group" aria-labelledby="settings-quickref-title">
+        <h2 id="settings-quickref-title">导本速查</h2>
+        <p id="quickref-hidden-text" class="route-hint">没有被剔除的导本。</p>
+        <button type="button" id="btn-quickref-restore" class="btn ghost" disabled>恢复全部已剔除的导本</button>
+      </section>
     </div>
   </section>
 

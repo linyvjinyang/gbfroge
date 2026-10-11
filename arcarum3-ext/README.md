@@ -1,4 +1,8 @@
-﻿# GBF Arcarum3 Map — Chrome 扩展
+﻿# gbfroge — Chrome 扩展（原 GBF Arcarum3 Map）
+
+> 安装、使用说明和声明见仓库根目录的 [README](../README.md)。
+> 本页是原版 [txwzy123/arcarum3-ext](https://github.com/txwzy123/arcarum3-ext) 的详细说明，主要保留导本 / 事件数据库的格式与合并方法；
+> 其中抓取方式已改为监听游戏的 jQuery 请求（不再 hook fetch / XHR），界面描述以根目录 README 为准。
 
 侧边栏展示地图状态与窗口控制，**独立地图窗口**可在全图与导本记录之间切换，实时拦截游戏接口。
 

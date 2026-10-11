@@ -2,7 +2,7 @@
  * Isolated content script: inject page-hook, forward captures to background.
  */
 (function () {
-  const SOURCE = "gbf-arcarum3-map-hook";
+  const SOURCE = "gbfroge-hook";
 
   // inject page world hook
   try {
@@ -12,7 +12,7 @@
     (document.documentElement || document.head).appendChild(s);
     s.onload = () => s.remove();
   } catch (e) {
-    console.warn("[gbf-map] inject failed", e);
+    console.warn("[gbfroge] inject failed", e);
   }
 
   window.addEventListener("message", (ev) => {

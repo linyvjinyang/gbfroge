@@ -10,10 +10,18 @@ export const MSG = {
   OPEN_MAP_WINDOW: "OPEN_MAP_WINDOW",
   FOCUS_MAP_WINDOW: "FOCUS_MAP_WINDOW",
   CLEAR_STATE: "CLEAR_STATE",
+  GET_BUILD: "GET_BUILD",
+  RESET_BATTLE_RECORD: "RESET_BATTLE_RECORD",
 };
 
 export const STORAGE_KEY = "arcarum3MapState";
 export const GUIDEBOOK_STORAGE_KEY = "arcarum3Guidebooks";
+export const DECK_STORAGE_KEY = "arcarum3Deck";
+export const BATTLE_STORAGE_KEY = "arcarum3Battle";
+export const OMEN_STORAGE_KEY = "arcarum3Omens";
+export const PARTY_STORAGE_KEY = "arcarum3Party";
+export const ENEMY_STORAGE_KEY = "arcarum3Enemies";
+export const SHOP_STORAGE_KEY = "arcarum3Shops";
 
 /** CDN base candidates (game rotates a1–a5) */
 export const CDN_BASES = [
@@ -61,4 +69,20 @@ export const GUIDEBOOK_CAPTURE_PATHS = [
   /\/rest\/arcarum3\/dungeon\/dungeon_shop_lineup\//i,
   /\/rest\/arcarum3\/dungeon\/purchase_dungeon_shop_item/i,
   /\/result(?:multi)?\/content\/index/i,
+];
+
+/**
+ * 盘子：普通编成是 party/deck；肉鸽内的编成接口路径不确定，
+ * 所以 arcarum3 下的响应也都按结构试一次（带 pc.weapons 才算）。
+ */
+export const DECK_CAPTURE_PATHS = [
+  /\/party\/deck/i,
+  /\/arcarum3\//i,
+];
+
+/** 战斗：开场与每次行动的结果 */
+export const BATTLE_CAPTURE_PATHS = [
+  /\/rest\/(?:raid|multiraid)\/start\.json/i,
+  /\/rest\/(?:raid|multiraid)\/[a-z_]+_result\.json/i,
+  /\/rest\/(?:raid|multiraid)\/user_recovery\.json/i,
 ];

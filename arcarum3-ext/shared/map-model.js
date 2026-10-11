@@ -1,4 +1,4 @@
-import { NODE_TYPE_NAMES } from "./nodeTypes.js";
+import { NODE_TYPE, NODE_TYPE_NAMES } from "./nodeTypes.js";
 import {
   resolveSpecialEventIconFile,
   isSkyCastleTruePortalConfirmed,
@@ -104,6 +104,117 @@ export function mergeDungeonState(prev, dungeon, meta = {}) {
   return ensureSafeZoneShrinking(next);
 }
 
+function toNodeId(value) {
+  if (value == null || value === "") return null;
+  const id = Number(value);
+  return Number.isFinite(id) ? id : null;
+}
+
+/** 响应里的行动脚本（移动、事件、选项的结果都放在这里） */
+export function listActionScenarios(response) {
+  const list =
+    response?.action_scenario_list ??
+    response?.actionScenarioList ??
+    response?.data?.action_scenario_list ??
+    response?.data?.actionScenarioList;
+  return Array.isArray(list) ? list.filter((item) => item && typeof item === "object") : [];
+}
+
+/**
+ * 移动、事件、选项这些响应不带整张地图，只带变化：把变化补到现有地图上。
+ * 没有这一步的话，地图要等下一次整图读取（基本只有打完一场战斗回到地图时）才会动。
+ *
+ * 字段参考 Tarou：
+ *   after_current_node_id                走完之后所在的格子
+ *   action_scenario_list[].action_type   5 传送（warp_node_id）/ 7 清掉格子 / 11 出现特殊事件
+ *   is_delete_node                       finish_node_event：当前格子用掉了
+ *   special_incident_appearance_info     finish_node_event：新出现的特殊事件
+ *
+ * @returns {{ state: any, changed: boolean }}
+ */
+export function applyDungeonActions(prev, response) {
+  if (!prev?.node_list?.length || !response || typeof response !== "object") {
+    return { state: prev, changed: false };
+  }
+  let current = prev.current_node_id ?? null;
+  /** @type {Map<number, object>} */
+  const patches = new Map();
+  const patch = (nodeId, fields) => {
+    const id = toNodeId(nodeId);
+    if (id != null) patches.set(id, { ...(patches.get(id) || {}), ...fields });
+  };
+  const moveTo = (nodeId) => {
+    const id = toNodeId(nodeId);
+    if (id != null) current = id;
+  };
+
+  moveTo(
+    response.after_current_node_id ??
+      response.current_node_id ??
+      response.option?.dungeon?.current_node_id ??
+      response.data?.after_current_node_id ??
+      response.data?.option?.dungeon?.current_node_id,
+  );
+
+  for (const scenario of listActionScenarios(response)) {
+    const type = Number(scenario.action_type ?? scenario.actionType);
+    const cleared = Array.isArray(scenario.delete_node_ids) ? scenario.delete_node_ids : [];
+    if (type === 5) {
+      moveTo(scenario.warp_node_id);
+      for (const id of cleared) patch(id, { node_type: NODE_TYPE.EMPTY, special_incident_id: null });
+    } else if (type === 7) {
+      for (const id of cleared) patch(id, { node_type: NODE_TYPE.EMPTY, special_incident_id: null });
+    } else if (type === 11 && scenario.special_incident_id) {
+      patch(scenario.node_id, {
+        node_type: NODE_TYPE.SPECIAL,
+        special_incident_id: Number(scenario.special_incident_id),
+      });
+    }
+  }
+
+  // finish_node_event：当前格子用掉了；新出现的特殊事件
+  if (response.is_delete_node && current != null) {
+    patch(current, { node_type: NODE_TYPE.EMPTY, special_incident_id: null });
+  }
+  const appearance = response.special_incident_appearance_info;
+  if (appearance && typeof appearance === "object") {
+    for (const group of Object.values(appearance)) {
+      for (const item of Array.isArray(group?.appearance_list) ? group.appearance_list : []) {
+        if (!item?.special_incident_id) continue;
+        patch(item.node_id, {
+          node_type: NODE_TYPE.SPECIAL,
+          special_incident_id: Number(item.special_incident_id),
+        });
+      }
+    }
+  }
+
+  // 站上去的格子算走过
+  if (current != null) patch(current, { is_visited: true });
+
+  let changed = Number(current) !== Number(prev.current_node_id);
+  const nodeList = prev.node_list.map((node) => {
+    const fields = patches.get(Number(node.node_id));
+    if (!fields) return node;
+    const differs = Object.keys(fields).some((key) => node[key] !== fields[key]);
+    if (!differs) return node;
+    changed = true;
+    return { ...node, ...fields };
+  });
+
+  // 响应里顺带的数值（有就用）：回合数、币
+  const next = { ...prev, current_node_id: current, node_list: nodeList };
+  for (const key of ["total_turn", "possession_arcarum3_dungeon_point"]) {
+    const value = response[key] ?? response.dungeon?.[key];
+    if (value == null || value === "" || !Number.isFinite(Number(value))) continue;
+    if (Number(value) !== Number(prev[key])) {
+      next[key] = Number(value);
+      changed = true;
+    }
+  }
+  return changed ? { state: next, changed: true } : { state: prev, changed: false };
+}
+
 function normalizeNode(n) {
   return {
     node_id: Number(n.node_id),
@@ -161,6 +272,17 @@ export function displayTurnNumber(totalTurn) {
   const t = Number(totalTurn);
   if (!Number.isFinite(t) || t < 0) return 1;
   return Math.floor(t) + 1;
+}
+
+/**
+ * 一局的开头：第 1 天第 1 回合的整张地图。
+ * @param {any} dungeon 整图读取到的 dungeon，或已保存的地图状态
+ */
+export function isRunStart(dungeon) {
+  if (!Array.isArray(dungeon?.node_list) || !dungeon.node_list.length) return false;
+  const turn = Number(dungeon.total_turn);
+  if (dungeon.total_turn == null || dungeon.total_turn === "" || !Number.isFinite(turn)) return false;
+  return displayTurnNumber(turn) === 1 && inferDay(dungeon) === 1;
 }
 
 /**

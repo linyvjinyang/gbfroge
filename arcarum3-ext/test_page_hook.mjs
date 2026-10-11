@@ -16,7 +16,12 @@ const document = {
     return [];
   },
 };
+let commandListener = null;
+const ajaxCalls = [];
 const window = {
+  addEventListener(type, listener) {
+    if (type === "message") commandListener = listener;
+  },
   fetch() {},
   XMLHttpRequest: class XMLHttpRequest {},
   postMessage(message, targetOrigin) {
@@ -25,6 +30,8 @@ const window = {
 };
 
 const context = vm.createContext({
+  // 页面里的时间跟测试用同一个钟
+  Date,
   URL,
   document,
   location: { href: "https://game.granbluefantasy.jp/#arcarum3/book" },
@@ -48,6 +55,7 @@ context.$ = context.jQuery = (target) => {
     },
   };
 };
+context.jQuery.ajax = (settings) => ajaxCalls.push(settings);
 poll();
 
 assert.equal(
@@ -73,7 +81,7 @@ ajaxSuccessHandler(
 assert.equal(posted.length, 1);
 assert.deepEqual(JSON.parse(JSON.stringify(posted[0])), {
   message: {
-    source: "gbf-arcarum3-map-hook",
+    source: "gbfroge-hook",
     type: "api",
     url: "https://game.granbluefantasy.jp/rest/arcarum3/dungeon/spacebook_status_list",
     method: "POST",
@@ -93,5 +101,10 @@ ajaxSuccessHandler(
 );
 assert.equal(posted.length, 2, "socket/query should be captured for the current player name");
 assert.equal(posted[1].message.url, "https://game.granbluefantasy.jp/socket/query?nickname=Alice");
+
+// —— 只听不发：页面脚本不主动发请求，也不接受外面发来的指令 ——
+assert.equal(commandListener, null, "页面脚本不监听任何指令");
+assert.equal(ajaxCalls.length, 0, "页面脚本不主动发请求");
+assert.doesNotMatch(source.replace(/ajaxSuccess/g, ""), /\.ajax\(|fetch\(|XMLHttpRequest|sendBeacon/, "页面脚本里没有任何发请求的代码");
 
 console.log("page hook: all assertions passed");

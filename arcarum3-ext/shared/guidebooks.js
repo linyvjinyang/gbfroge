@@ -852,6 +852,34 @@ function battleRewardStatuses(response) {
     .filter(Boolean);
 }
 
+/** 只属于一局的内容：手里的导本、商店货架、正在进行的选择。图鉴不动。 */
+function clearRunFields(state) {
+  if (
+    !Object.keys(state.inventory).length &&
+    !Object.keys(state.shopLineup).length &&
+    !state.activeSelection &&
+    !state.activeIncident &&
+    !state.activeShop &&
+    state.currentSpecialIncidentId == null
+  ) {
+    return false;
+  }
+  state.inventory = {};
+  state.shopLineup = {};
+  state.activeSelection = null;
+  state.activeIncident = null;
+  state.activeShop = null;
+  state.currentSpecialIncidentId = null;
+  return true;
+}
+
+/** 新的一局开始：清掉上一局手里的导本 */
+export function resetGuidebookRun(previous) {
+  const state = cloneState(previous);
+  const changed = clearRunFields(state);
+  return { state: changed ? state : previous, changed };
+}
+
 export function updateGuidebookState(previous, response, options = {}) {
   const state = cloneState(previous);
   const url = String(options.url || "");
@@ -884,22 +912,7 @@ export function updateGuidebookState(previous, response, options = {}) {
   }
 
   if (/\/rest\/arcarum3\/start_dungeon/i.test(url)) {
-    if (
-      Object.keys(state.inventory).length ||
-      Object.keys(state.shopLineup).length ||
-      state.activeSelection ||
-      state.activeIncident ||
-      state.activeShop ||
-      state.currentSpecialIncidentId != null
-    ) {
-      state.inventory = {};
-      state.shopLineup = {};
-      state.activeSelection = null;
-      state.activeIncident = null;
-      state.activeShop = null;
-      state.currentSpecialIncidentId = null;
-      changed = true;
-    }
+    changed = clearRunFields(state) || changed;
   }
 
   if (/\/arcarum3\/dungeon\/content\/index\//i.test(url) && state.activeShop) {
