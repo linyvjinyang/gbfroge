@@ -12,6 +12,7 @@ import {
   PARTY_STORAGE_KEY,
   ENEMY_STORAGE_KEY,
   SHOP_STORAGE_KEY,
+  CAPTURE_LOG_STORAGE_KEY,
   CDN_BASES,
   NODE_SIZE,
   BASE_ANCHOR_X,
@@ -66,6 +67,7 @@ import {
   quickTarget,
 } from "../shared/path/quickTargets.js";
 import { fitBounds, nearbyBounds } from "../shared/path/nearbyView.js";
+import { exportCaptureLog } from "../shared/captureLog.js";
 import {
   describeShop,
   mayOfferRemoval,
@@ -1993,6 +1995,49 @@ async function resync() {
     apply(bag[key] ?? null);
   }
 }
+
+/** 设置页「排查」：导出 / 清空内存里的抓包记录 */
+async function readCaptureLog() {
+  try {
+    return (await chrome.storage.session.get(CAPTURE_LOG_STORAGE_KEY))?.[CAPTURE_LOG_STORAGE_KEY] || null;
+  } catch {
+    return null;
+  }
+}
+
+async function refreshCaptureCount() {
+  const count = (await readCaptureLog())?.entries?.length || 0;
+  $("capture-log-count").textContent = count ? `已记录 ${count} 条` : "还没有记录";
+  $("btn-export-captures").disabled = !count;
+  $("btn-clear-captures").disabled = !count;
+}
+
+$("btn-export-captures").addEventListener("click", async () => {
+  const log = await readCaptureLog();
+  if (!log?.entries?.length) return;
+  const payload = exportCaptureLog(log, { version: chrome.runtime.getManifest?.().version || "" });
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `gbfroge-captures-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+
+$("btn-clear-captures").addEventListener("click", async () => {
+  try {
+    await chrome.storage.session.remove(CAPTURE_LOG_STORAGE_KEY);
+  } catch {
+    /* 没有就算了 */
+  }
+  refreshCaptureCount();
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "session" && changes[CAPTURE_LOG_STORAGE_KEY]) refreshCaptureCount();
+});
+refreshCaptureCount();
 
 setInterval(resync, RESYNC_INTERVAL_MS);
 document.addEventListener("visibilitychange", resync);

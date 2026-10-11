@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 
 const storage = {};
+const sessionStorage = {};
 const messageListeners = [];
 const tabMessages = [];
 
@@ -31,6 +32,10 @@ globalThis.chrome = {
       },
       async set(values) { Object.assign(storage, structuredClone(values)); },
       async remove(key) { for (const item of [].concat(key)) delete storage[item]; },
+    },
+    session: {
+      async get(key) { return { [key]: sessionStorage[key] }; },
+      async set(values) { Object.assign(sessionStorage, structuredClone(values)); },
     },
   },
   windows: {
@@ -374,6 +379,21 @@ await captureFromTab(`${ORIGIN}/rest/arcarum3/dungeon/party_status?_=56`, {
 await captureFromTab(`${ORIGIN}/arcarum3/dungeon/content/index/0?_=57`, mapAt(0));
 build = await dispatch({ type: "GET_BUILD" });
 assert.equal(build.party.members[0].hp, 9000, "start_dungeon 之后读到的新数据不会被地图再清一遍");
+
+// —— 排查用的抓包记录：只记肉鸽接口，放在内存里，不带用户 ID ——
+await capture(`${ORIGIN}/rest/arcarum3/dungeon/spacebook_status_list?filter_type=4&_=1&t=2&uid=12345678`, {
+  status_list: [{ status_id: 7, name: "ダメージ上限UP(10%)", num: 1, user_id: "12345678" }],
+});
+await new Promise((resolve) => setTimeout(resolve, 30));
+{
+  const entries = sessionStorage.gbfrogeCaptureLog.entries;
+  assert.ok(entries.length > 10, "肉鸽接口都记下来了");
+  assert.equal(entries.at(-1).url, "/rest/arcarum3/dungeon/spacebook_status_list?filter_type=4");
+  assert.equal(entries.at(-1).response.status_list[0].name, "ダメージ上限UP(10%)");
+  assert.equal(JSON.stringify(entries).includes("12345678"), false, "记录里不带用户 ID");
+  assert.equal(entries.some((entry) => /\/raid\//.test(entry.url)), false, "战斗接口不记");
+  assert.equal(storage.gbfrogeCaptureLog, undefined, "不写进本地存储，只放在内存里");
+}
 
 // 只听不发：后台从不向游戏页发消息
 assert.deepEqual(tabMessages, [], "后台不向游戏页发任何指令");

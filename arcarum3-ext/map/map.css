@@ -2898,3 +2898,11 @@ button:disabled {
   min-width: 140px;
   grid-template-columns: repeat(auto-fit, minmax(66px, 1fr));
 }
+
+/* 设置页：一行按钮 */
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}

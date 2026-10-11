@@ -423,6 +423,16 @@
         <p id="quickref-hidden-text" class="route-hint">没有被剔除的导本。</p>
         <button type="button" id="btn-quickref-restore" class="btn ghost" disabled>恢复全部已剔除的导本</button>
       </section>
+
+      <section class="panel-block settings-group" aria-labelledby="settings-debug-title">
+        <h2 id="settings-debug-title">排查</h2>
+        <p class="route-hint">显示的内容和游戏里对不上时用。插件会记下最近 60 条肉鸽接口的原始内容，只放在浏览器内存里，关掉浏览器就清空。导出的文件已隐去用户 ID 和昵称，但仍是你的游戏数据，不要公开发布。</p>
+        <div class="settings-actions">
+          <button type="button" id="btn-export-captures" class="btn ghost">导出最近抓包</button>
+          <button type="button" id="btn-clear-captures" class="btn ghost">清空</button>
+          <span id="capture-log-count" class="route-hint"></span>
+        </div>
+      </section>
     </div>
   </section>
 

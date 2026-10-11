@@ -145,6 +145,10 @@ export function createGuidebookView({ onRender } = {}) {
   function selectionRule(selection) {
     const min = selection?.selectNumMin;
     const max = selection?.selectNumMax;
+    if (selection?.source === "inherit") {
+      const limit = max != null ? `最多 ${max} 本` : "";
+      return `上一局的导本，可选择继承${limit ? `（${limit}）` : ""}，确认后才算拿到`;
+    }
     if (min == null && max == null) return "请选择导本";
     if (min === max) return `需选择 ${min} 项`;
     if (min == null) return `最多选择 ${max} 项`;

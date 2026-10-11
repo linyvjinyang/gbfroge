@@ -8,6 +8,7 @@ import {
   PARTY_STORAGE_KEY,
   ENEMY_STORAGE_KEY,
   SHOP_STORAGE_KEY,
+  CAPTURE_LOG_STORAGE_KEY,
   CAPTURE_PATHS,
   PROFILE_CAPTURE_PATHS,
   GUIDEBOOK_CAPTURE_PATHS,
@@ -40,6 +41,7 @@ import { statusLogEntries } from "./shared/bossMechanics.js";
 import { extractPartyStatus, extractScenarioParty } from "./shared/party.js";
 import { createEnemyLog, recordKills, recordSightings } from "./shared/enemyLog.js";
 import { createShopState, recordShopLineup, recordShopPurchase } from "./shared/shops.js";
+import { appendCapture, createCaptureLog, shouldLogCapture } from "./shared/captureLog.js";
 
 /** @type {number|null} */
 let mapWindowId = null;
@@ -47,6 +49,7 @@ let guidebookUpdateQueue = Promise.resolve();
 let buildUpdateQueue = Promise.resolve();
 let guidebookSeedPromise = null;
 let incidentSeedPromise = null;
+let captureLogQueue = Promise.resolve();
 /** 刚收到 start_dungeon、还没等到这一局的第一张地图 */
 let pendingRunStart = false;
 
@@ -67,6 +70,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function handleMessage(message, sender) {
   switch (message?.type) {
     case MSG.API_CAPTURED:
+      logCapture(message.payload);
       return onApiCaptured(message.payload);
     case MSG.GET_STATE:
       return { ok: true, state: await getState() };
@@ -105,6 +109,23 @@ async function handleMessage(message, sender) {
   }
 }
 
+/**
+ * 排查用：把肉鸽接口的原始内容记进内存里的记录（设置页可以导出）。
+ * 不等它写完，也不让它的失败影响正常处理。
+ */
+function logCapture(payload) {
+  const area = chrome.storage?.session;
+  if (!area || !shouldLogCapture(payload?.url)) return;
+  captureLogQueue = captureLogQueue
+    .catch(() => {})
+    .then(async () => {
+      const bag = await area.get(CAPTURE_LOG_STORAGE_KEY);
+      const next = appendCapture(bag?.[CAPTURE_LOG_STORAGE_KEY] || createCaptureLog(), payload);
+      await area.set({ [CAPTURE_LOG_STORAGE_KEY]: next });
+    })
+    .catch(() => {});
+}
+
 function matchCapture(url, patterns) {
   try {
     const path = new URL(url).pathname;
@@ -119,7 +140,7 @@ function classify(url) {
   if (/\/socket\/query/i.test(path)) return "player_profile";
   if (/\/arcarum3\/book(?:\/|$)/i.test(path)) return "guidebook_page";
   if (/spacebook_status_list/i.test(path)) return "guidebook_list";
-  if (/spacebook_status_add/i.test(path)) return "guidebook_add";
+  if (/spacebook_status_add|carryover_spacebook_status/i.test(path)) return "guidebook_add";
   if (/spacebook_status_remove/i.test(path)) return "guidebook_remove";
   if (/dungeon_shop_lineup/i.test(path)) return "guidebook_shop";
   if (/purchase_dungeon_shop_item/i.test(path)) return "guidebook_purchase";

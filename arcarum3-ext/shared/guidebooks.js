@@ -22,6 +22,21 @@ const SPECIAL_INCIDENT_SELECTION_KEYS = {
 const BOOK_ACTION_GAIN = 400;
 const BOOK_ACTION_SELECT = 401;
 const BOOK_ACTION_REMOVE = 402;
+/**
+ * spacebook_status_list 的 filter_type=4：开局「从上一局继承导本」页面的候选列表。
+ * 格式和持有列表一模一样（每项都带 num），但它们还没拿到手，不能算持有。
+ */
+const STATUS_LIST_FILTER_INHERIT = 4;
+/** 继承候选在「本次选择」里的来源标记 */
+const SELECTION_SOURCE_INHERIT = "inherit";
+/** 地图的 dungeon_status：9 = 还在等玩家选继承哪些导本 */
+const DUNGEON_STATUS_CARRYOVER = 9;
+/**
+ * 「确认拿到这几本」的请求：请求里的 status_ids 就是拿到的。
+ *   proceed_node_event_spacebook_status_add  地图里事件给的选择
+ *   carryover_spacebook_status               开局继承上一局的导本
+ */
+const GAIN_REQUEST_PATTERN = /spacebook_status_add|carryover_spacebook_status/i;
 
 export function createGuidebookState() {
   return {
@@ -35,6 +50,8 @@ export function createGuidebookState() {
     activeIncident: null,
     activeShop: null,
     currentSpecialIncidentId: null,
+    /** 这一局开局能继承几本导本：{ min, max }（来自地图的 carryover_select_num_*） */
+    carryoverSelect: null,
     playerName: "",
     updatedAt: null,
     lastCapture: null,
@@ -116,6 +133,13 @@ function cloneState(previous) {
     activeIncident: cloneActiveIncident(previous.activeIncident),
     activeShop: cloneActiveShop(previous.activeShop),
     currentSpecialIncidentId: toNumber(previous.currentSpecialIncidentId),
+    carryoverSelect:
+      previous.carryoverSelect && typeof previous.carryoverSelect === "object"
+        ? {
+            min: toNumber(previous.carryoverSelect.min),
+            max: toNumber(previous.carryoverSelect.max),
+          }
+        : null,
     playerName: typeof previous.playerName === "string" ? previous.playerName : "",
   };
 }
@@ -245,7 +269,7 @@ function sourceForUrl(url) {
   if (/dungeon_shop_lineup/i.test(url)) return "shop";
   if (/purchase_dungeon_shop_item/i.test(url)) return "shop_purchase";
   if (/\/result(?:multi)?\/content\/index/i.test(url)) return "battle_result";
-  if (/spacebook_status_add/i.test(url)) return "gain";
+  if (GAIN_REQUEST_PATTERN.test(url)) return "gain";
   if (/spacebook_status_remove/i.test(url)) return "remove";
   if (/move_node/i.test(url)) return "move_node";
   if (/incident_choose/i.test(url)) return "incident";
@@ -572,6 +596,17 @@ function recordIncidentSelection(state, incident, meta) {
     catalogueChanged:
       !previous || !equalJson(withoutIncidentTimes(previous), withoutIncidentTimes(next)),
   };
+}
+
+/** spacebook_status_list 请求里的 filter_type（在地址参数里，也兼容放在请求体里） */
+function statusListFilterType(url, request) {
+  let fromUrl = null;
+  try {
+    fromUrl = new URL(url).searchParams.get("filter_type");
+  } catch {
+    fromUrl = String(url || "").match(/[?&]filter_type=([^&#]*)/)?.[1] ?? null;
+  }
+  return toNumber(fromUrl ?? findKey(request, ["filter_type", "filterType"]));
 }
 
 function findAuthoritativeStatusList(response) {
@@ -919,6 +954,29 @@ export function updateGuidebookState(previous, response, options = {}) {
     state.activeShop = null;
     changed = true;
   }
+  if (/\/arcarum3\/dungeon\/content\/index\//i.test(url)) {
+    const dungeon = response?.option?.dungeon ?? response?.data?.option?.dungeon;
+    if (dungeon && typeof dungeon === "object") {
+      const carryover = {
+        min: toNumber(dungeon.carryover_select_num_min),
+        max: toNumber(dungeon.carryover_select_num_max),
+      };
+      const next = carryover.min != null || carryover.max != null ? carryover : null;
+      if (!equalJson(state.carryoverSelect, next)) {
+        state.carryoverSelect = next;
+        changed = true;
+      }
+    }
+    // 游戏在玩家选好之后会先回到地图、再发确认（真实抓包顺序），所以还在等继承时候选要留着；
+    // 地图已经不在等继承了，候选才清掉
+    if (
+      state.activeSelection?.source === SELECTION_SOURCE_INHERIT &&
+      toNumber(dungeon?.dungeon_status) !== DUNGEON_STATUS_CARRYOVER
+    ) {
+      state.activeSelection = null;
+      changed = true;
+    }
+  }
 
   const isBattleResult = /\/result(?:multi)?\/content\/index/i.test(url);
   const battleStatuses = isBattleResult ? battleRewardStatuses(response) : [];
@@ -968,7 +1026,33 @@ export function updateGuidebookState(previous, response, options = {}) {
       for (const status of authoritative) {
         applyCatalogueResult(recordCatalogue(state, status, meta));
       }
-      changed = setInventory(state, authoritative, meta) || changed;
+      if (statusListFilterType(url, request) === STATUS_LIST_FILTER_INHERIT) {
+        // 继承页面的候选：放进「本次选择」给玩家看，不动手里的导本
+        const nextSelection = authoritative.length
+          ? {
+              scenarioType: null,
+              candidateNum: authoritative.length,
+              selectNumMin: state.carryoverSelect?.min ?? null,
+              selectNumMax: state.carryoverSelect?.max ?? null,
+              candidates: authoritative.map(selectionCandidate),
+              capturedAt: now,
+              source: SELECTION_SOURCE_INHERIT,
+            }
+          : null;
+        if (nextSelection || state.activeSelection?.source === SELECTION_SOURCE_INHERIT) {
+          if (!equalJson(state.activeSelection, nextSelection)) {
+            state.activeSelection = nextSelection;
+            changed = true;
+          }
+          if (nextSelection && (state.activeIncident || state.activeShop)) {
+            state.activeIncident = null;
+            state.activeShop = null;
+            changed = true;
+          }
+        }
+      } else {
+        changed = setInventory(state, authoritative, meta) || changed;
+      }
     }
   }
 
@@ -981,7 +1065,7 @@ export function updateGuidebookState(previous, response, options = {}) {
   }
 
   let gainIds = [];
-  if (/spacebook_status_add/i.test(url)) {
+  if (GAIN_REQUEST_PATTERN.test(url)) {
     gainIds = extractRequestStatusIds(request);
     for (const statusId of gainIds) {
       applyCatalogueResult(ensureCatalogueId(state, statusId, meta));
@@ -1070,7 +1154,7 @@ export function updateGuidebookState(previous, response, options = {}) {
     }
   }
 
-  if (/spacebook_status_add/i.test(url) && (state.activeSelection || state.activeIncident || state.activeShop)) {
+  if (GAIN_REQUEST_PATTERN.test(url) && (state.activeSelection || state.activeIncident || state.activeShop)) {
     state.activeSelection = null;
     state.activeIncident = null;
     state.activeShop = null;

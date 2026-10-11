@@ -22,6 +22,8 @@ export const OMEN_STORAGE_KEY = "arcarum3Omens";
 export const PARTY_STORAGE_KEY = "arcarum3Party";
 export const ENEMY_STORAGE_KEY = "arcarum3Enemies";
 export const SHOP_STORAGE_KEY = "arcarum3Shops";
+/** 排查用的抓包记录：放在 chrome.storage.session（只在内存里，关掉浏览器就清空） */
+export const CAPTURE_LOG_STORAGE_KEY = "gbfrogeCaptureLog";
 
 /** CDN base candidates (game rotates a1–a5) */
 export const CDN_BASES = [
@@ -65,6 +67,8 @@ export const PROFILE_CAPTURE_PATHS = [
 export const GUIDEBOOK_CAPTURE_PATHS = [
   /\/arcarum3\/book(?:\/|$)/i,
   /\/rest\/arcarum3\/dungeon\/spacebook_status_list/i,
+  // 开局继承上一局导本的确认（真实抓包：请求 { status_ids: [...] }，响应里是 action_type 400）
+  /\/rest\/arcarum3\/dungeon\/carryover_spacebook_status/i,
   /\/rest\/arcarum3\/dungeon\/proceed_node_event_spacebook_status_(?:add|remove)/i,
   /\/rest\/arcarum3\/dungeon\/dungeon_shop_lineup\//i,
   /\/rest\/arcarum3\/dungeon\/purchase_dungeon_shop_item/i,

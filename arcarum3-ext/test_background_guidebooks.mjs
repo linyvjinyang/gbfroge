@@ -243,4 +243,54 @@ await dispatch({ type: "CLEAR_STATE" });
 const preservedState = await dispatch({ type: "GET_GUIDEBOOKS" });
 assert.equal(Object.keys(preservedState.state.catalogue).length, 5);
 
+// —— 开局继承导本（真实抓包的接口和顺序）：候选不算持有，确认后只记选中的 ——
+{
+  const send = (url, body, requestBody) =>
+    dispatch({ type: "API_CAPTURED", payload: { url, method: requestBody ? "POST" : "GET", status: 200, body, requestBody } });
+  const base = "https://game.granbluefantasy.jp/rest/arcarum3/dungeon";
+  const mapUrl = "https://game.granbluefantasy.jp/arcarum3/dungeon/content/index/0?_=1";
+  const waitingMap = {
+    option: {
+      dungeon: {
+        name: "test",
+        carryover_select_num_max: 1,
+        carryover_select_num_min: 1,
+        dungeon_status: 9,
+        current_node_id: 1,
+        total_turn: 0,
+        node_list: [{ node_id: 1, node_type: 0, position_x: 0, position_y: 0, adjacent_node_ids: [] }],
+      },
+    },
+  };
+  await send("https://game.granbluefantasy.jp/rest/arcarum3/start_dungeon", { redirect_scene: null }, JSON.stringify({ dungeon_id: 1 }));
+  await send(mapUrl, waitingMap);
+  await send(`${base}/spacebook_status_list?filter_type=4&_=1&t=2`, {
+    status_list: [
+      { name: "ダメージ上限UP(10%)", status_id: 7, icon_category: 1, icon_type: 308, rarity: 1, num: 1 },
+      { name: "背水", status_id: 10, icon_category: 1, icon_type: 4, rarity: 1, num: 1 },
+    ],
+  });
+  let inherit = (await dispatch({ type: "GET_GUIDEBOOKS" })).state;
+  assert.deepEqual(inherit.inventory, {}, "继承候选不进持有");
+  assert.equal(inherit.activeSelection.source, "inherit");
+  assert.equal(inherit.activeSelection.selectNumMax, 1);
+
+  // 选好后游戏先回地图，再发确认
+  await send(mapUrl, waitingMap);
+  const confirmed = await send(
+    `${base}/carryover_spacebook_status`,
+    {
+      action_scenario_list: [{ action_type: 400, scenario_type: 3, status_list: [{ name: "背水", status_id: 10, rarity: 1 }] }],
+      dungeon_status: 2,
+      total_turn: 0,
+    },
+    JSON.stringify({ special_token: null, status_ids: [10] }),
+  );
+  assert.equal(confirmed.kind, "guidebook_add");
+  inherit = (await dispatch({ type: "GET_GUIDEBOOKS" })).state;
+  assert.deepEqual(Object.keys(inherit.inventory), ["10"], "只记选中的那本");
+  assert.equal(inherit.inventory[10].num, 1);
+  assert.equal(inherit.activeSelection, null);
+}
+
 console.log("background guidebooks: all assertions passed");

@@ -1082,4 +1082,154 @@ assert.equal(state.inventory[201].num, 2, "导本页应按持有实例聚合数�
 assert.equal(state.inventory[202].num, 1);
 assert.equal(Object.keys(state.inventory).length, 2, "导本页应替换当前持有状态");
 
+// —— 开局「从上一局继承导本」：候选列表不是持有（真实抓包：filter_type=4，每项都带 num） ——
+{
+  const inheritResponse = {
+    status_list: [
+      { name: "ダメージ上限UP(10%)", target_type: null, target_param: "", display_ailment_id: null, status_id: 7, icon_category: 1, icon_type: 308, rarity: 1, is_duplication_possible: 1, deck_condition: 0, num: 1 },
+      { name: "背水", target_type: null, target_param: "", display_ailment_id: null, status_id: 10, icon_category: 1, icon_type: 4, rarity: 1, is_duplication_possible: 1, deck_condition: 0, num: 1 },
+    ],
+  };
+  const listUrl = "https://game.granbluefantasy.jp/rest/arcarum3/dungeon/spacebook_status_list";
+  let run = createGuidebookState();
+  let result = updateGuidebookState(run, inheritResponse, {
+    url: `${listUrl}?filter_type=4&_=1791705159127&t=1791705159481`,
+    now: 100,
+  });
+  run = result.state;
+  assert.equal(result.changed, true);
+  assert.deepEqual(run.inventory, {}, "继承候选不能算进手里的导本");
+  assert.deepEqual(Object.keys(run.catalogue).sort(), ["10", "7"], "候选照常收进图鉴");
+  assert.deepEqual(run.activeSelection.candidates.map((item) => item.statusId), [7, 10], "候选显示在「本次选择」里");
+  assert.equal(run.activeSelection.source, "inherit");
+
+  // 选了「背水」并确认：只有选中的进入持有，候选清掉
+  run = updateGuidebookState(run, {}, {
+    url: "https://game.granbluefantasy.jp/rest/arcarum3/dungeon/proceed_node_event_spacebook_status_add",
+    requestBody: JSON.stringify({ status_ids: [10] }),
+    now: 200,
+  }).state;
+  assert.deepEqual(Object.keys(run.inventory), ["10"], "只有选中的那本进入持有");
+  assert.equal(run.activeSelection, null);
+
+  // 手里已经有导本时再看到继承候选：不影响已有的
+  run = updateGuidebookState(run, inheritResponse, { url: `${listUrl}?filter_type=4`, now: 300 }).state;
+  assert.deepEqual(Object.keys(run.inventory), ["10"]);
+  assert.equal(run.inventory[10].num, 1);
+  assert.ok(run.activeSelection);
+
+  // 没确认就回到地图：候选不再显示，手里的不变
+  run = updateGuidebookState(run, { option: {} }, {
+    url: "https://game.granbluefantasy.jp/arcarum3/dungeon/content/index/0",
+    now: 400,
+  }).state;
+  assert.equal(run.activeSelection, null, "回到地图后继承候选清掉");
+  assert.deepEqual(Object.keys(run.inventory), ["10"]);
+
+  // 地图里事件给的选择（401）不受「回到地图」影响
+  run = updateGuidebookState(run, {
+    action_scenario_list: [{ action_type: 401, status_list: [{ status_id: 7, name: "ダメージ上限UP(10%)", rarity: 1 }] }],
+  }, { url: "https://game.granbluefantasy.jp/rest/arcarum3/dungeon/move_node", now: 500 }).state;
+  run = updateGuidebookState(run, { option: {} }, {
+    url: "https://game.granbluefantasy.jp/arcarum3/dungeon/content/index/0",
+    now: 600,
+  }).state;
+  assert.ok(run.activeSelection, "事件的导本选择在刷新地图后仍保留");
+
+  // 不带 filter_type、或别的 filter_type：仍然是持有列表，整体校正
+  run = updateGuidebookState(run, inheritResponse, { url: `${listUrl}?filter_type=1`, now: 700 }).state;
+  assert.deepEqual(Object.keys(run.inventory).sort(), ["10", "7"], "其他列表照旧按真实持有校正");
+  run = updateGuidebookState(run, { status_list: [inheritResponse.status_list[0]] }, { url: listUrl, now: 800 }).state;
+  assert.deepEqual(Object.keys(run.inventory), ["7"]);
+
+  // —— 真实抓包的完整顺序：地图（等继承）→ 候选列表 → 又回地图 → 确认 → 地图 ——
+  {
+    const mapUrl = "https://game.granbluefantasy.jp/arcarum3/dungeon/content/index/0";
+    const mapBody = (dungeonStatus) => ({
+      option: {
+        dungeon: {
+          carryover_select_num_max: 1,
+          carryover_select_num_min: 1,
+          dungeon_status: dungeonStatus,
+          total_turn: 0,
+          node_list: [],
+        },
+      },
+    });
+    let flow = updateGuidebookState(createGuidebookState(), { redirect_scene: null }, {
+      url: "https://game.granbluefantasy.jp/rest/arcarum3/start_dungeon",
+      requestBody: JSON.stringify({ deck_id: 31032, difficulty: 0, dungeon_id: 1, special_token: null }),
+      now: 10,
+    }).state;
+    flow = updateGuidebookState(flow, mapBody(9), { url: mapUrl, now: 20 }).state;
+    assert.deepEqual(flow.carryoverSelect, { min: 1, max: 1 }, "记下这一局能继承几本");
+    flow = updateGuidebookState(flow, { status_list: [inheritResponse.status_list[1]] }, {
+      url: `${listUrl}?filter_type=4`,
+      now: 30,
+    }).state;
+    assert.deepEqual(flow.inventory, {});
+    assert.equal(flow.activeSelection.selectNumMax, 1, "候选带上能选几本");
+    // 选好之后游戏先回到地图（还在等继承），候选不能在这里清掉
+    flow = updateGuidebookState(flow, mapBody(9), { url: mapUrl, now: 40 }).state;
+    assert.ok(flow.activeSelection, "还在等继承时回到地图，候选留着");
+    // 确认：请求里是选中的编号，响应里是「获得」
+    const confirmed = updateGuidebookState(
+      flow,
+      {
+        action_scenario_list: [
+          { action_type: 400, scenario_type: 3, status_list: [{ deck_condition: 0, icon_category: 1, icon_type: 4, is_duplication_possible: 1, name: "背水", rarity: 1, status_id: 10 }] },
+        ],
+        dungeon_status: 2,
+        node_type: 0,
+        total_turn: 0,
+      },
+      {
+        url: "https://game.granbluefantasy.jp/rest/arcarum3/dungeon/carryover_spacebook_status",
+        requestBody: JSON.stringify({ special_token: null, status_ids: [10] }),
+        now: 50,
+      },
+    );
+    flow = confirmed.state;
+    assert.deepEqual(Object.keys(flow.inventory), ["10"], "继承确认后，选中的那本进入持有");
+    assert.equal(flow.inventory[10].num, 1, "请求和响应说的是同一本，只算一次");
+    assert.equal(flow.inventory[10].source, "gain");
+    assert.equal(flow.activeSelection, null, "确认后候选清掉");
+    // 之后的地图（正常探索）不影响持有
+    flow = updateGuidebookState(flow, mapBody(2), { url: mapUrl, now: 60 }).state;
+    assert.deepEqual(Object.keys(flow.inventory), ["10"]);
+
+    // 一本都不继承：什么都不加
+    let skipped = updateGuidebookState(createGuidebookState(), inheritResponse, { url: `${listUrl}?filter_type=4`, now: 30 }).state;
+    skipped = updateGuidebookState(skipped, { action_scenario_list: [], dungeon_status: 2 }, {
+      url: "https://game.granbluefantasy.jp/rest/arcarum3/dungeon/carryover_spacebook_status",
+      requestBody: JSON.stringify({ special_token: null, status_ids: [] }),
+      now: 50,
+    }).state;
+    assert.deepEqual(skipped.inventory, {});
+    assert.equal(skipped.activeSelection, null);
+
+    // 只有响应、读不到请求内容时：按响应里的「获得」加
+    let byResponse = updateGuidebookState(createGuidebookState(), inheritResponse, { url: `${listUrl}?filter_type=4`, now: 30 }).state;
+    byResponse = updateGuidebookState(
+      byResponse,
+      { action_scenario_list: [{ action_type: 400, status_list: [inheritResponse.status_list[0]] }] },
+      { url: "https://game.granbluefantasy.jp/rest/arcarum3/dungeon/carryover_spacebook_status", now: 50 },
+    ).state;
+    assert.deepEqual(Object.keys(byResponse.inventory), ["7"]);
+
+    // 没在等继承的地图（正常探索中）会清掉残留的候选
+    let stale = updateGuidebookState(createGuidebookState(), inheritResponse, { url: `${listUrl}?filter_type=4`, now: 30 }).state;
+    stale = updateGuidebookState(stale, mapBody(2), { url: mapUrl, now: 40 }).state;
+    assert.equal(stale.activeSelection, null);
+  }
+
+  // filter_type 放在请求体里也认
+  run = updateGuidebookState(createGuidebookState(), inheritResponse, {
+    url: listUrl,
+    requestBody: "filter_type=4",
+    now: 900,
+  }).state;
+  assert.deepEqual(run.inventory, {});
+}
+
 console.log("guidebooks: all assertions passed");

@@ -94,6 +94,8 @@ assert.match(buildScript, /function numberEl\(/);
 assert.match(mapScript, /setInterval\(resync, RESYNC_INTERVAL_MS\)/, "除了推送，每 10 秒兜底同步一次");
 assert.match(mapScript, /const RESYNC_INTERVAL_MS = 10_000;/);
 assert.doesNotMatch(mapHtml, /reread-on-start/, "没有主动补读的开关：插件只听不发");
+assert.match(mapHtml, /id="btn-export-captures"/, "设置页可以导出排查用的抓包记录");
+assert.match(mapScript, /chrome\.storage\.session\.get\(CAPTURE_LOG_STORAGE_KEY\)/, "抓包记录只从内存里读");
 assert.doesNotMatch(mapScript, /fetch\(["'`]https?:\/\/game\.granbluefantasy/, "兜底同步只读本地存储，不向游戏发请求");
 assert.match(mapCss, /\.party-row\.is-back\s*\{[^}]*grid-template-columns:\s*auto auto minmax\(0, 1fr\)/s);
 assert.match(mapCss, /\.party-row-tiles\s*\{[^}]*repeat\(4,/s, "一行放得下 4 人，前排不换行");
