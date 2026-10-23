@@ -38,8 +38,12 @@ assert(miasmaSoftPrimaryOnEnter(map.nodes[3]) > 0, "目标寻路圈外 primary>0
 
 const r = findLowestScorePath(map, 1, 5, { day: 1, miasmaCenter: center });
 console.log("explore path", r?.path, "score", r?.score);
-// 最优：1→2（-10），不应为了第二场战去 4（-10+空+8+毒圈14 更差）
-assert(r && r.path.join(",") === "1,2", `应停在圈内战斗，得到 ${r?.path}`);
+// 最优：吃掉圈内的 2；每回合都得走，之后多走一格空地往圈心靠（1→2→3）也可以；
+// 不应为了第二场战去圈外的 4
+assert(
+  r && ["1,2", "1,2,3"].includes(r.path.join(",")),
+  `应留在圈内吃战斗，得到 ${r?.path}`,
+);
 assert(!r.path.includes(4), "不应为圆心/圈外战硬穿出");
 
 // 圈外是唯一可走收益：1→4(战,shrink)，软约束不硬拦，仍可规划

@@ -80,11 +80,12 @@ const CHEST = 6;
 
   const plain = findLowestScorePath(map, start, 8, { day: 1 });
   assert.ok(plain);
-  assert.equal(
-    Math.max(...plain.path.map(rowOf)),
-    0,
-    "无偏置时只吃同一行的收益，不会无故下行",
+  // 每回合都得走，停下不是免费的：两边的收益都会去拿，为了绕过起点最多下到第 2 行，不会往深处走
+  assert.ok(
+    Math.max(...plain.path.map(rowOf)) <= 1,
+    `无偏置时不会无故往深处走，实际到了第 ${Math.max(...plain.path.map(rowOf))} 行`,
   );
+  assert.equal(plain.rewardCount, 3, "预算内够得着的收益都拿到");
 
   const down = makeDownBias(map, start);
   const biased = findLowestScorePath(map, start, 8, { day: 1, downBias: down });
