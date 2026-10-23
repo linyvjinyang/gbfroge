@@ -38,7 +38,9 @@ export const MIASMA_DEFAULT_RADIUS = 670;
 /**
  * 进入瘴气格（is_shrinking）时，扫路累计分增加量（最小化，越大越差）
  */
-export const MIASMA_OUTSIDE_ENTER_SCORE = 14;
+// 进瘴气会吃毒：比「收益格 + 少踩一格空地」（10 + 10）还大，所以不会为了瘴气里的收益进去；
+// 人在圈外时仍然会走回圈里（停在瘴气里更亏）。
+export const MIASMA_OUTSIDE_ENTER_SCORE = 24;
 
 /**
  * 目标寻路：进入瘴气格的 primary 增量
@@ -254,4 +256,87 @@ export function nodeXY(n) {
   const y = Number(n.y ?? n.position_y);
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
   return { x, y };
+}
+
+/**
+ * 现在的安全圈半径（地图距离）：按服务端给的瘴气标记估，不用圈图尺寸——
+ * 圈内离圆心最远的格子和瘴气里离圆心最近的格子取中间。
+ * @param {{ x?: number, y?: number, position_x?: number, position_y?: number,
+ *           isShrinking?: boolean, is_shrinking?: boolean }[]} nodes
+ * @param {{ x: number, y: number } | null} center
+ * @returns {number | null}
+ */
+export function estimateSafeRadius(nodes, center) {
+  if (!center || !Array.isArray(nodes)) return null;
+  let maxInside = null;
+  let minOutside = null;
+  for (const node of nodes) {
+    const x = Number(node?.x ?? node?.position_x);
+    const y = Number(node?.y ?? node?.position_y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    const dist = Math.hypot(x - center.x, y - center.y);
+    if (isNodeInMiasma(node)) minOutside = minOutside == null ? dist : Math.min(minOutside, dist);
+    else maxInside = maxInside == null ? dist : Math.max(maxInside, dist);
+  }
+  if (maxInside == null) return minOutside;
+  if (minOutside == null || minOutside < maxInside) return maxInside;
+  return (maxInside + minOutside) / 2;
+}
+
+/** 缩圈记录最多留几条 */
+export const MIASMA_TRACK_LIMIT = 40;
+/** 学速度时最多看最近几条 */
+const SHRINK_FIT_SAMPLES = 8;
+
+/**
+ * 在地图状态上记一笔「第几回合、圈有多大」，用来学缩圈速度。
+ * 同一回合只留最新的一笔；回合数变小（新的一局）就从头记。
+ * @returns {any} 带 miasma_track 的新状态（没有变化时原样返回）
+ */
+export function withMiasmaTrack(state) {
+  const center = getMiasmaCenter(state);
+  if (!center) return state;
+  const radius = estimateSafeRadius(state?.node_list, center);
+  const turn = Number(state?.total_turn);
+  if (radius == null || state?.total_turn == null || !Number.isFinite(turn)) return state;
+  let track = Array.isArray(state.miasma_track) ? state.miasma_track : [];
+  const last = track[track.length - 1];
+  if (last && turn < last.turn) track = [];
+  const tail = track[track.length - 1];
+  if (tail && tail.turn === turn) {
+    if (Math.abs(tail.radius - radius) < 0.5) return state;
+    track = [...track.slice(0, -1), { turn, radius }];
+  } else {
+    track = [...track, { turn, radius }].slice(-MIASMA_TRACK_LIMIT);
+  }
+  return { ...state, miasma_track: track };
+}
+
+/**
+ * 缩圈速度（地图距离 / 回合）：只看最近一段「一直在缩」的记录，对回合做直线拟合。
+ * 少于两个不同回合的记录，或者没在缩，返回 null（不预测）。
+ * @param {{ turn: number, radius: number }[] | null | undefined} track
+ * @returns {{ speed: number, samples: number } | null}
+ */
+export function estimateShrinkSpeed(track) {
+  if (!Array.isArray(track) || track.length < 2) return null;
+  // 从最新往回找：半径一直不变小（往回看就是不变大）的那一段；圈突然变大说明换了阶段，之前的不算
+  const recent = [track[track.length - 1]];
+  for (let index = track.length - 2; index >= 0 && recent.length < SHRINK_FIT_SAMPLES; index--) {
+    const entry = track[index];
+    if (!(entry.turn < recent[0].turn) || entry.radius + 0.5 < recent[0].radius) break;
+    recent.unshift(entry);
+  }
+  if (recent.length < 2 || recent[0].turn === recent[recent.length - 1].turn) return null;
+  const meanTurn = recent.reduce((sum, entry) => sum + entry.turn, 0) / recent.length;
+  const meanRadius = recent.reduce((sum, entry) => sum + entry.radius, 0) / recent.length;
+  let covariance = 0;
+  let variance = 0;
+  for (const entry of recent) {
+    covariance += (entry.turn - meanTurn) * (entry.radius - meanRadius);
+    variance += (entry.turn - meanTurn) ** 2;
+  }
+  const slope = variance > 0 ? covariance / variance : 0;
+  if (!(slope < 0)) return null;
+  return { speed: -slope, samples: recent.length };
 }

@@ -51,6 +51,7 @@ import {
 } from "../shared/path/routeInteraction.js";
 import {
   findLowestScorePathSticky,
+  describeShrink,
   describeExploreScores,
   scoreForType,
   makeSweepBias,
@@ -1267,7 +1268,12 @@ function refreshExploreLegend() {
   const opts = getExploreOpts();
   const mc = opts.miasmaCenter;
   const miasmaNote = mc
-    ? ` · 毒圈开：优先留在白圈内（惩罚 is_shrinking），不强制去圆心`
+    ? (() => {
+        const shrink = describeShrink(toRouteMap(state));
+        return shrink?.speed
+          ? ` · 缩圈中：圈每回合约缩 ${Math.round(shrink.speed)}（看最近 ${shrink.samples} 回合），路线避开到时会被吞的格子`
+          : " · 缩圈中：先进圈；多走几回合学到缩圈速度后，会避开到时会被吞的格子";
+      })()
     : "";
   const coins = currentCoins();
   const shopNote =

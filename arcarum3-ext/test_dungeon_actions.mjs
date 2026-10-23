@@ -107,6 +107,30 @@ assert.deepEqual(applyDungeonActions(null, { after_current_node_id: 2 }), { stat
   assert.equal(same.changed, false);
 }
 
+// 这一步被瘴气吞掉的格子、最新的瘴气状态（真实抓包里 miasma_info 带 before / after / shrink_node_ids）
+{
+  const prev = base();
+  const after = { is_miasmic: true, center_position_x: 30, center_position_y: 0, level: 1, step: 2, pattern_id: 1 };
+  const { state, changed } = applyDungeonActions(prev, {
+    after_current_node_id: 2,
+    miasma_info: { before: { is_miasmic: true }, after, shrink_node_ids: [3, 4] },
+    total_turn: 5,
+  });
+  assert.equal(changed, true);
+  assert.equal(find(state, 3).is_shrinking, true, "被吞掉的格子标成瘴气");
+  assert.equal(find(state, 4).is_shrinking, true);
+  assert.equal(Boolean(find(state, 1).is_shrinking), false);
+  assert.deepEqual(state.miasma_info.after, after, "瘴气状态换成最新的");
+  assert.equal("shrink_node_ids" in state.miasma_info, false, "这一步的变化不存进状态");
+  assert.equal(prev.miasma_info, undefined, "不改动原来的状态");
+
+  // 没有缩圈、瘴气状态也没变：不算变化
+  const again = applyDungeonActions(state, {
+    miasma_info: { before: { is_miasmic: true }, after, shrink_node_ids: [] },
+  });
+  assert.equal(again.changed, false);
+}
+
 // 行动脚本的几种写法
 assert.equal(listActionScenarios({ action_scenario_list: [{ action_type: 1 }, null, 3] }).length, 1);
 assert.equal(listActionScenarios({ data: { action_scenario_list: [{}] } }).length, 1);

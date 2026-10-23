@@ -20,7 +20,7 @@ const BATTLE = 2;
  * @param {(col: number, row: number) => number} typeAt
  * @param {{ x: number, y: number, r: number } | null} circle 缩圈：圆心和半径（世界坐标）
  */
-function gridState(typeAt, circle = null) {
+function gridState(typeAt, circle = null, track = null) {
   const node_list = [];
   for (let row = 0; row < SIZE; row++) {
     for (let col = 0; col < SIZE; col++) {
@@ -42,6 +42,7 @@ function gridState(typeAt, circle = null) {
     }
   }
   const state = { node_list };
+  if (track) state.miasma_track = track;
   if (circle) {
     state.miasma_info = {
       after: { is_miasmic: true, center_position_x: circle.x, center_position_y: circle.y, safe_radius: circle.r, pattern_id: 1 },
@@ -90,16 +91,24 @@ const plan = (state, start, n = 12) => {
   assert.ok(result.path.every((id) => !byId.get(id).is_shrinking), "不出圈");
 }
 
-// —— 4) 圈边外面一格有收益、进出都只踩这一格瘴气：顺手拿，然后回到圈里，不停在瘴气里 ——
+// —— 4) 圈会缩：人在圈中心时，不会为了圈边外的收益往外跑（那里迟早被吞） ——
 {
   const circle = { x: 500, y: 500, r: 260 };
   const start = idOf(4, 4);
-  // (2,2) 在圈外，左右两边的 (3,2)、(2,3) 都在圈里：从一边进、另一边出
   const state = gridState((col, row) => (col === 2 && row === 2 ? BATTLE : 0), circle);
   const { result, byId } = plan(state, start);
   assert.equal(byId.get(idOf(2, 2)).is_shrinking, true);
-  assert.ok(result.path.includes(idOf(2, 2)), "圈边外一格的收益会去拿");
-  assert.equal(byId.get(result.path.at(-1)).is_shrinking, false, "拿完回到圈里，不停在瘴气里");
+  assert.ok(result.path.every((id) => !byId.get(id).is_shrinking), "不进瘴气拿收益（会吃毒）");
+}
+
+// —— 4b) 往圈心去的路上有收益：顺路拿 ——
+{
+  const circle = { x: 500, y: 500, r: 260 };
+  const start = idOf(2, 4); // 圈的左边缘
+  const state = gridState((col, row) => (col === 3 && row === 4 ? BATTLE : 0), circle);
+  const { result } = plan(state, start);
+  assert.ok(result.path.includes(idOf(3, 4)), "往圈心去的路上的收益会拿");
+  assert.ok(result.path.includes(idOf(4, 4)), "最后到圈中心");
 }
 
 // —— 5) 圈外深处的一串收益：不会在瘴气里一直逛 ——
@@ -129,6 +138,26 @@ const plan = (state, start, n = 12) => {
     explorePlanScore(map, result.path, scored.score, 10, { day: 1, miasmaCenter: map.miasmaCenter }),
     result.planScore,
   );
+}
+
+// —— 7) 学到缩圈速度后：到时会被吞的格子不去（按地图距离预测，不按格子数） ——
+{
+  const circle = { x: 500, y: 500, r: 360 };
+  const start = idOf(4, 4);
+  // 圈边上的 (1,4) 在圈里（离圆心 300），走过去要 3 回合
+  const reward = idOf(1, 4);
+  const typeAt = (col, row) => (col === 1 && row === 4 ? BATTLE : 0);
+
+  const unknown = plan(gridState(typeAt, circle), start);
+  assert.ok(unknown.result.path.includes(reward), "还没学到速度：圈边的收益照拿");
+
+  // 最近两回合圈从 400 缩到 340（每回合 30）：3 回合后半径约 250，(1,4) 那时已经被吞
+  const fast = plan(gridState(typeAt, circle, [{ turn: 3, radius: 400 }, { turn: 5, radius: 340 }]), start);
+  assert.ok(!fast.result.path.includes(reward), "学到缩得快：不去到时会被吞的格子");
+
+  // 缩得很慢（每回合 2）：3 回合后还在圈里，照拿
+  const slow = plan(gridState(typeAt, circle, [{ turn: 3, radius: 344 }, { turn: 5, radius: 340 }]), start);
+  assert.ok(slow.result.path.includes(reward), "缩得慢：圈边的收益照拿");
 }
 
 console.log("route keep-moving tests passed");

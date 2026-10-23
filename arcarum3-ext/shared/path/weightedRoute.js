@@ -151,6 +151,8 @@ export function toRouteMap(state) {
     nodes,
     /** 毒圈开启时的白圈中心（展示用）；寻路用节点 isShrinking 判是否在圈内 */
     miasmaCenter: getMiasmaCenter(state),
+    /** 每回合圈有多大的记录：扫路用它学缩圈速度 */
+    miasmaTrack: Array.isArray(state?.miasma_track) ? state.miasma_track : [],
   };
 }
 

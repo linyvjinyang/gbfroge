@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "gbfroge",
-  "version": "0.4.16",
+  "version": "0.4.17",
   "description": "碧蓝幻想肉鸽助手：实时地图与寻路、导本记录、盘子与当前伤害。",
   "permissions": ["storage", "sidePanel", "windows", "tabs"],
   "host_permissions": [

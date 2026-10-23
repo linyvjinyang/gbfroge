@@ -25,6 +25,11 @@
  *   停在瘴气里的这一项不管有没有走满都算，所以路线不会刚好在预算的最后一步停进瘴气。
  * 这样周围都打完了也会继续往有收益的地方走。界面上显示的「累计分」仍是路线本身的分。
  *
+ * 【缩圈：先进圈，学到速度后按速度规划】
+ * 刚缩圈时只求进圈（停在瘴气里很亏，见下面的计划分）。之后每回合记一笔圈有多大，
+ * 学出「每回合缩多少地图距离」；规划时第 t 步进入的格子，如果到那时会在圈外，就按瘴气格算。
+ * 速度按地图上的距离算，不按格子数，所以格子疏密、连线长短都考虑进去了。
+ *
  * 【瘴气（圈外）越待越亏】
  * 进瘴气格的分随「已经连续在瘴气里待了几格」递增：第 1 格 +14，之后每多待一格再 +6。
  * 所以圈边上的收益会顺手去拿（拿一两个就回来），但不会在瘴气里一直逛；人在圈外时会往圈里走。
@@ -34,6 +39,8 @@ import { NODE_TYPE } from "../nodeTypes.js";
 import {
   MIASMA_DEFAULT_RADIUS,
   MIASMA_OUTSIDE_ENTER_SCORE,
+  estimateSafeRadius,
+  estimateShrinkSpeed,
   isNodeInMiasma,
 } from "../miasma.js";
 
@@ -179,21 +186,64 @@ export function minPossibleStepScore(opts = {}) {
   return m;
 }
 
+/**
+ * 缩圈的看法：现在的半径、学到的速度，以及「第 step 步进入时这个格子在不在瘴气里」。
+ * 没开缩圈返回 null。速度学不出来时只看现在的瘴气标记，不做预测。
+ * @param {{ nodes: any[], miasmaTrack?: { turn: number, radius: number }[] }} map
+ * @param {{ x: number, y: number, radius?: number | null } | null} center
+ */
+export function makeMiasmaView(map, center) {
+  if (!center) return null;
+  const radiusNow =
+    estimateSafeRadius(map.nodes, center) ??
+    (Number(center.radius) > 0 ? Number(center.radius) : MIASMA_DEFAULT_RADIUS);
+  const learned = estimateShrinkSpeed(map.miasmaTrack);
+  const speed = learned?.speed || 0;
+  const distOf = (node) =>
+    Number.isFinite(node?.x) && Number.isFinite(node?.y)
+      ? Math.hypot(node.x - center.x, node.y - center.y)
+      : null;
+  const radiusAt = (step) => radiusNow - speed * Math.max(0, step);
+  return {
+    center,
+    radiusNow,
+    speed,
+    samples: learned?.samples || 0,
+    radiusAt,
+    distOf,
+    /** 第 step 步走到 node 时，它在不在瘴气里（已经是瘴气，或按速度到时会被吞） */
+    inAt(node, step) {
+      if (isNodeInMiasma(node)) return true;
+      if (!speed) return false;
+      const dist = distOf(node);
+      return dist != null && dist > radiusAt(step);
+    },
+  };
+}
+
+/** 扫路说明里用：现在的缩圈速度（没学到返回 null） */
+export function describeShrink(map) {
+  const view = makeMiasmaView(map, map?.miasmaCenter || null);
+  if (!view) return null;
+  return { radius: view.radiusNow, speed: view.speed, samples: view.samples };
+}
+
 /** 在瘴气里每多连续待一格，进下一格瘴气再多扣的分 */
 export const MIASMA_STAY_ESCALATION = 6;
 
 /**
  * 进入 toNode 的瘴气分。
  * @param {number} streak 进入之前已经连续在瘴气里的格数（含当前所在格）
+ * @param {boolean} [inMiasma] 进入时它在不在瘴气里（默认看现在的标记）
  */
-export function miasmaStepScore(toNode, streak) {
-  if (!isNodeInMiasma(toNode)) return 0;
+export function miasmaStepScore(toNode, streak, inMiasma = isNodeInMiasma(toNode)) {
+  if (!inMiasma) return 0;
   return MIASMA_OUTSIDE_ENTER_SCORE + MIASMA_STAY_ESCALATION * Math.max(0, streak);
 }
 
 /** 走到 node 之后，连续在瘴气里的格数 */
-function nextMiasmaStreak(streak, node) {
-  return isNodeInMiasma(node) ? streak + 1 : 0;
+function nextMiasmaStreak(streak, node, inMiasma = isNodeInMiasma(node)) {
+  return inMiasma ? streak + 1 : 0;
 }
 
 /** 方向偏置：每沿着偏好的方向走满一个「典型纵向落差」给的奖励分（略高于空地惩罚，穿空地也不亏） */
@@ -361,18 +411,17 @@ export function downStepScore(from, to, bias) {
  *            remaining: number, streak: number) => number}
  *   remaining：预算里没走的步数；streak：结束时已经连续在瘴气里的格数
  */
-function makePlanTail(map, weights, center) {
+function makePlanTail(map, weights, view) {
   const idle = Math.max(0, Number(weights.EMPTY) || 0);
-  const stepLength = center ? mapGeometry(map)?.stepLength || null : null;
-  const radius = Number(center?.radius) > 0 ? Number(center.radius) : MIASMA_DEFAULT_RADIUS;
-  return (endNode, remaining, streak = 0) => {
+  const stepLength = view ? mapGeometry(map)?.stepLength || null : null;
+  return (endNode, remaining, streak = 0, endStep = 0) => {
     let cost = Math.max(0, remaining) * idle;
-    if (center && isNodeInMiasma(endNode)) {
+    if (view && view.inAt(endNode, endStep)) {
       // 停在瘴气里：之后大约还要踩几格瘴气才回到圈里，越待越亏；再加上停在瘴气里本身的一格
       let steps = 1;
-      if (stepLength && Number.isFinite(endNode?.x) && Number.isFinite(endNode?.y)) {
-        const gap = Math.hypot(endNode.x - center.x, endNode.y - center.y) - radius;
-        steps = Math.max(1, Math.ceil(gap / stepLength));
+      const dist = view.distOf(endNode);
+      if (stepLength && dist != null) {
+        steps = Math.max(1, Math.ceil((dist - view.radiusAt(endStep)) / stepLength));
       }
       for (let index = 0; index < steps; index++) {
         cost += MIASMA_OUTSIDE_ENTER_SCORE + MIASMA_STAY_ESCALATION * Math.max(0, streak + index);
@@ -393,13 +442,18 @@ function makePlanTail(map, weights, center) {
  */
 export function explorePlanScore(map, path, routeScore, numPoints, opts = {}) {
   const weights = getExploreWeights(opts);
-  const center = opts.miasmaCenter || map.miasmaCenter || null;
-  const tail = makePlanTail(map, weights, center);
+  const view = makeMiasmaView(map, opts.miasmaCenter || map.miasmaCenter || null);
+  const tail = makePlanTail(map, weights, view);
   const byId = new Map(map.nodes.map((node) => [Number(node.id), node]));
   let streak = 0;
-  if (center) for (const id of path) streak = nextMiasmaStreak(streak, byId.get(Number(id)));
+  if (view) {
+    path.forEach((id, step) => {
+      const node = byId.get(Number(id));
+      streak = nextMiasmaStreak(streak, node, view.inAt(node, step));
+    });
+  }
   const remaining = Math.floor(Number(numPoints)) - path.length;
-  return routeScore + tail(byId.get(Number(path[path.length - 1])), remaining, streak);
+  return routeScore + tail(byId.get(Number(path[path.length - 1])), remaining, streak, path.length - 1);
 }
 
 /**
@@ -447,7 +501,8 @@ export function findLowestScorePath(map, startId, numPoints, opts = {}) {
   // 剪枝下界：毒圈最好情况 = 全程留在白圈内（+0），不按「朝圆心」给负 slack；
   // 向下偏置最好情况 = 每步都拿满 -weight；剩下步数的成本最好情况是 0
   const minStep = Math.min(0, minPossibleStepScore(scoreOpts) - maxSweepBonus(down));
-  const planTail = makePlanTail(map, weights, center);
+  const view = makeMiasmaView(map, center);
+  const planTail = makePlanTail(map, weights, view);
 
   /** @type {ExploreResult | null} */
   let best = null;
@@ -459,7 +514,7 @@ export function findLowestScorePath(map, startId, numPoints, opts = {}) {
   let path = [startId];
   let prefixScore = 0;
   /** streaks[i]：走到 path[i] 时连续在瘴气里的格数 */
-  let streaks = [center ? nextMiasmaStreak(0, byId.get(startId)) : 0];
+  let streaks = [view ? nextMiasmaStreak(0, byId.get(startId), view.inAt(byId.get(startId), 0)) : 0];
   if (Array.isArray(opts.forcedPrefix) && opts.forcedPrefix.length > 1) {
     const fp = opts.forcedPrefix.slice(0, n);
     let ok = Number(fp[0]) === Number(startId);
@@ -480,9 +535,10 @@ export function findLowestScorePath(map, startId, numPoints, opts = {}) {
           break;
         }
         prefixScore += stepScore + downStepScore(a, b, down);
-        if (center) {
-          prefixScore += miasmaStepScore(b, prefixStreaks[i - 1]);
-          prefixStreaks.push(nextMiasmaStreak(prefixStreaks[i - 1], b));
+        if (view) {
+          const inside = view.inAt(b, i);
+          prefixScore += miasmaStepScore(b, prefixStreaks[i - 1], inside);
+          prefixStreaks.push(nextMiasmaStreak(prefixStreaks[i - 1], b, inside));
         } else {
           prefixStreaks.push(0);
         }
@@ -513,7 +569,7 @@ export function findLowestScorePath(map, startId, numPoints, opts = {}) {
   function consider(scoreSoFar, depth) {
     if (depth < 1) return;
     const end = byId.get(path[path.length - 1]);
-    const planScore = scoreSoFar + planTail(end, maxSteps - depth, streaks[streaks.length - 1]);
+    const planScore = scoreSoFar + planTail(end, maxSteps - depth, streaks[streaks.length - 1], depth);
     const endDist =
       center && Number.isFinite(end?.x) && Number.isFinite(end?.y)
         ? Math.hypot(end.x - center.x, end.y - center.y)
@@ -569,19 +625,20 @@ export function findLowestScorePath(map, startId, numPoints, opts = {}) {
         const toN = byId.get(v);
         let s = scoreForNode(toN, scoreOpts) + downStepScore(node, toN, down);
         // 毒圈：进入瘴气格加分（更差），连续待得越久越亏；圈内游走不加，不强制去圆心
-        if (center) {
-          s += miasmaStepScore(toN, streaks[streaks.length - 1]);
+        let inMiasma = false;
+        if (view) {
+          inMiasma = view.inAt(toN, depth + 1);
+          s += miasmaStepScore(toN, streaks[streaks.length - 1], inMiasma);
         }
         // 优先扩展：同分时先走非瘴气格
-        const outside = toN.isShrinking || toN.is_shrinking ? 1 : 0;
-        return { v, s, outside };
+        return { v, s, outside: inMiasma ? 1 : 0 };
       })
       .sort((a, b) => a.s - b.s || a.outside - b.outside);
 
-    for (const { v, s } of neigh) {
+    for (const { v, s, outside } of neigh) {
       path.push(v);
       onPath.add(v);
-      streaks.push(center ? nextMiasmaStreak(streaks[streaks.length - 1], byId.get(v)) : 0);
+      streaks.push(view ? nextMiasmaStreak(streaks[streaks.length - 1], byId.get(v), outside === 1) : 0);
       dfs(scoreSoFar + s, depth + 1);
       streaks.pop();
       onPath.delete(v);
@@ -624,7 +681,8 @@ export function scoreExplorePath(map, path, opts = {}) {
   let rewardCount = 0;
   let penaltyCount = 0;
   const seen = new Set([path[0]]);
-  let streak = center ? nextMiasmaStreak(0, byId.get(path[0])) : 0;
+  const view = makeMiasmaView(map, center);
+  let streak = view ? nextMiasmaStreak(0, byId.get(path[0]), view.inAt(byId.get(path[0]), 0)) : 0;
   for (let i = 1; i < path.length; i++) {
     const a = byId.get(path[i - 1]);
     const b = byId.get(path[i]);
@@ -642,9 +700,10 @@ export function scoreExplorePath(map, path, opts = {}) {
     score += sc + downStepScore(a, b, down);
     if (sc < 0) rewardCount++;
     if (sc > 0) penaltyCount++;
-    if (center) {
-      score += miasmaStepScore(b, streak);
-      streak = nextMiasmaStreak(streak, b);
+    if (view) {
+      const inside = view.inAt(b, i);
+      score += miasmaStepScore(b, streak, inside);
+      streak = nextMiasmaStreak(streak, b, inside);
     }
   }
   return { score, rewardCount, penaltyCount, valid: true };

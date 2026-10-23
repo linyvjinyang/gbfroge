@@ -3,7 +3,7 @@ import {
   resolveSpecialEventIconFile,
   isSkyCastleTruePortalConfirmed,
 } from "./nodeTypes.js";
-import { ensureSafeZoneShrinking, getMiasmaCenter } from "./miasma.js";
+import { ensureSafeZoneShrinking, getMiasmaCenter, withMiasmaTrack } from "./miasma.js";
 
 /**
  * Extract dungeon object from various GBF response shapes.
@@ -101,7 +101,11 @@ export function mergeDungeonState(prev, dungeon, meta = {}) {
 
   // 毒圈已开但服务端尚未标 is_shrinking 时：按圆心+圈图半径用位置关系补全
   // （金色安全区外 → is_shrinking=true）；已有标记则尊重服务端
-  return ensureSafeZoneShrinking(next);
+  // 换了一张地图（新的一局）：缩圈记录从头来
+  if (prev?.map_id != null && next.map_id != null && prev.map_id !== next.map_id) {
+    next.miasma_track = [];
+  }
+  return withMiasmaTrack(ensureSafeZoneShrinking(next));
 }
 
 function toNodeId(value) {
@@ -129,6 +133,9 @@ export function listActionScenarios(response) {
  *   action_scenario_list[].action_type   5 传送（warp_node_id）/ 7 清掉格子 / 11 出现特殊事件
  *   is_delete_node                       finish_node_event：当前格子用掉了
  *   special_incident_appearance_info     finish_node_event：新出现的特殊事件
+ *   miasma_info / miasma_info.shrink_node_ids
+ *                                        这一步之后的瘴气状态、这一步被瘴气吞掉的格子
+ *                                        （真实抓包：carryover_spacebook_status 的响应里就有）
  *
  * @returns {{ state: any, changed: boolean }}
  */
@@ -189,6 +196,11 @@ export function applyDungeonActions(prev, response) {
     }
   }
 
+  // 这一步被瘴气吞掉的格子
+  const miasma = response.miasma_info ?? response.data?.miasma_info;
+  const shrinkIds = Array.isArray(miasma?.shrink_node_ids) ? miasma.shrink_node_ids : [];
+  for (const id of shrinkIds) patch(id, { is_shrinking: true });
+
   // 站上去的格子算走过
   if (current != null) patch(current, { is_visited: true });
 
@@ -204,6 +216,16 @@ export function applyDungeonActions(prev, response) {
 
   // 响应里顺带的数值（有就用）：回合数、币
   const next = { ...prev, current_node_id: current, node_list: nodeList };
+  // 瘴气状态（圆心、是否在蔓延）：有就换成最新的
+  if (miasma && typeof miasma === "object" && (miasma.after || miasma.before)) {
+    // shrink_node_ids 只是这一步的变化，不存进状态
+    const { shrink_node_ids: _shrunk, ...miasmaState } = miasma;
+    const nextMiasma = { ...(prev.miasma_info || {}), ...miasmaState };
+    if (JSON.stringify(nextMiasma) !== JSON.stringify(prev.miasma_info ?? null)) {
+      next.miasma_info = nextMiasma;
+      changed = true;
+    }
+  }
   for (const key of ["total_turn", "possession_arcarum3_dungeon_point"]) {
     const value = response[key] ?? response.dungeon?.[key];
     if (value == null || value === "" || !Number.isFinite(Number(value))) continue;
@@ -212,7 +234,8 @@ export function applyDungeonActions(prev, response) {
       changed = true;
     }
   }
-  return changed ? { state: next, changed: true } : { state: prev, changed: false };
+  if (!changed) return { state: prev, changed: false };
+  return { state: withMiasmaTrack(next), changed: true };
 }
 
 function normalizeNode(n) {
